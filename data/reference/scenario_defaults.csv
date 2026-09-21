@@ -1,0 +1,4 @@
+scenario_id,scenario_name,freight_change_pct,fuel_change_pct,delay_hours,port_congestion_level,description,source,data_type
+BASELINE,Baseline,0.0,0.0,0.0,MEDIUM,Standard baseline market conditions with normal forward expectations.,SYNTHETIC_GENERATOR_V1,SYNTHETIC
+ADVERSE,Adverse Market Shock,25.0,15.0,48.0,HIGH,"Simulated fleet tightness, high bunker inflation, and acute discharge port waiting times.",SYNTHETIC_GENERATOR_V1,SYNTHETIC
+FAVORABLE,Favorable Easing,-15.0,-10.0,0.0,LOW,"Softening freight indices, declining bunker prices, and expedited berthing queues.",SYNTHETIC_GENERATOR_V1,SYNTHETIC

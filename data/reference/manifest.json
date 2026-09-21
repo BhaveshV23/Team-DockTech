@@ -1,0 +1,30 @@
+{
+  "generator_name": "DockTech Synthetic Generator",
+  "generator_version": "1.0.0",
+  "master_seed": 26006,
+  "generation_timestamp": "2026-09-21T20:15:09.254847+00:00",
+  "history_start_date": "2024-01-01",
+  "history_end_date": "2025-12-31",
+  "record_counts": {
+    "ports": 15,
+    "berths": 32,
+    "vessel_classes": 6,
+    "routes": 28,
+    "freight_rates": 245616,
+    "commodity_prices": 1462,
+    "fuel_prices": 1462,
+    "port_activity": 10965,
+    "scenario_defaults": 3
+  },
+  "checksums_sha256": {
+    "ports.csv": "2dda28af7529f32eea3035db350860401f73d6e47dd4cb7ef89c81b6f48f44f0",
+    "berths.csv": "1e54582ecbf6b3df989e4b14500d9b7d2da7ffe5ee0bef13836463bccd03012b",
+    "vessel_classes.csv": "acbdfc8a2955de7577424d3680a3b802edd0e96132d6d881ebd509ef4445174d",
+    "routes.csv": "60c00b2f1ba554d9a34a194f8f95f147f6cfd4032abfb5e8298438061db5ec6d",
+    "freight_rates.csv": "1d0fedf72ca878b5e221bc38a6f80c3f1abe44a396ceae218a99290e58909cbb",
+    "commodity_prices.csv": "2cb924f36ad001de2c6ea273bee99819ac9466a6a898dbc22de7cd9d62735231",
+    "fuel_prices.csv": "89726bf044ebc72b8109b250d298b8a03bc803221967bc3b3a42a1f27d066f2b",
+    "port_activity.csv": "2c77b62b81786fa77da5409db8b916085aa6f7621e06278ae16f161db22f9110",
+    "scenario_defaults.csv": "3cfbeb878f7367f3b7d65fddc3436eb6d94ea75066df3ef9fe7f1086852dae77"
+  }
+}
