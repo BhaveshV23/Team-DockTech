@@ -126,7 +126,7 @@ These rules are non-negotiable and align with `ARCHITECTURE.md`.
 ## 3.2 Frontend architecture
 
 1. Put generic reusable visual primitives in `components/ui/`.
-2. Put reusable FreightWise-specific presentation components in `components/domain/`.
+2. Put reusable DockTech-specific presentation components in `components/domain/`.
 3. Put page composition and routing concerns in `pages/`.
 4. Put feature state, query hooks, API-to-view-model mapping, and feature orchestration in `features/`.
 5. Put HTTP/API clients in `services/`; do not scatter `fetch` calls across low-level components.
@@ -160,7 +160,7 @@ Supabase is the project's managed backend infrastructure for PostgreSQL, Authent
 ## 4.2 Frontend and Supabase
 
 1. React may use the Supabase client for **authentication/session operations** required by the approved architecture.
-2. React must not directly read or write FreightWise application tables as a substitute for FastAPI.
+2. React must not directly read or write DockTech application tables as a substitute for FastAPI.
 3. Core application data, forecasting, feasibility, cost, recommendation, scenario, report, and administrative operations must go through the FastAPI API.
 4. Never expose the Supabase `service_role` key, database credentials, private signing keys, or other privileged secrets to the browser.
 5. Do not put privileged Supabase operations in React components, hooks, or client-side utility modules.
@@ -541,3 +541,4 @@ It is intended to be usable by:
 An AI IDE should not be expected to understand the entire project from `RULES.md` alone. The repository should keep `PRD.md`, `ARCHITECTURE.md`, `DESIGN.md`, and `RULES.md` together at the project root. The agent should load or inspect all four before substantial work and then inspect the relevant source code.
 
 For maximum reliability, keep these documents synchronized. When a major architecture decision changes, update the affected source-of-truth document(s) rather than adding contradictory instructions only to this file.
+

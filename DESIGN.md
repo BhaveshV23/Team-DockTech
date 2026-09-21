@@ -16,7 +16,7 @@ This is the primary visual system for the product:
 - **Spatial visualization** may be introduced later for route/vessel visualizations, but is not the primary application layout.
 - Do not use neomorphism, claymorphism, maximalism, skeuomorphism, or heavy liquid-glass styling as the core visual language.
 
-The goal is to make FreightWise AI look like a serious operational-intelligence product rather than a decorative UI showcase. Visual styling must never reduce readability of freight rates, forecasts, vessel constraints, cost ranges, risks, or recommendations.
+The goal is to make DockTech look like a serious operational-intelligence product rather than a decorative UI showcase. Visual styling must never reduce readability of freight rates, forecasts, vessel constraints, cost ranges, risks, or recommendations.
 
 ## Design Principles
 
@@ -407,7 +407,7 @@ frontend/src/
 
 ### Component rules
 - `components/ui/` contains generic, reusable visual primitives. It must not contain product-specific data fetching or business calculations.
-- `components/domain/` contains reusable FreightWise-specific presentation components. It receives already-prepared view data via props.
+- `components/domain/` contains reusable DockTech-specific presentation components. It receives already-prepared view data via props.
 - `pages/` compose components and coordinate page-level state. Keep them thin.
 - `features/` owns feature-level hooks, state, API-query integration, and mapping API responses to view models.
 - `services/` contains HTTP calls only; it must never connect directly to a database.
@@ -692,7 +692,7 @@ Use toasts for transient confirmation: `Report exported`, `Scenario saved`. Do n
 ### UI separation
 1. React components must not contain SQL, ORM code, direct database calls to application tables, Supabase service-role credentials, or server secrets.
 2. React components must not calculate forecast outputs, vessel feasibility, contract strategy, pricing, or ranking policy. They render API-provided results and collect inputs.
-3. Reusable primitives belong in `components/ui/`; reusable FreightWise display components belong in `components/domain/`.
+3. Reusable primitives belong in `components/ui/`; reusable DockTech display components belong in `components/domain/`.
 4. Page components compose components; do not duplicate component markup across pages.
 5. API calls belong in `services/` and feature hooks, never scattered in low-level UI controls.
 6. Map API response objects to view models in feature-level adapters/hooks, not repeatedly in individual components.
@@ -807,3 +807,4 @@ A user interface feature is complete when it:
 - Keeps business logic and authorization decisions on the backend.
 - Presents assumptions, units, data recency, uncertainty, and recommendation rationale where relevant.
 - Has been reviewed against this design document.
+

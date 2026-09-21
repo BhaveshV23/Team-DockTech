@@ -263,7 +263,7 @@ User --> CargoRequest / Scenario / AuditLog
 This structure uses a Python FastAPI backend and a React frontend. The frontend is a separate web application that communicates with the backend through APIs.
 
 ```text
-freightwise-ai/
+docktech/
 ├── README.md
 ├── PRD.md
 ├── ARCHITECTURE.md
@@ -598,3 +598,4 @@ A feature is complete only when:
 - Unit/integration/API tests relevant to the change pass.
 - Assumptions, source metadata, and user-facing explanations are visible where relevant.
 - The feature does not expose secrets, commercial data, or raw internal errors.
+
