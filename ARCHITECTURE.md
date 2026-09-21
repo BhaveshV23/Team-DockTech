@@ -1,295 +1,298 @@
 # System Architecture
 
 ## Product
-**DockTech** is an intelligent freight forecasting and chartering decision-support system for SAIL bulk-cargo procurement to India’s East Coast ports. The system combines freight forecasting, vessel–port feasibility checks, voyage-cost estimation, risk scenarios, and actionable chartering recommendations.
+**DockTech** is an intelligent freight forecasting and chartering decision-support system for bulk cargo procurement (specifically coal imports) to India’s East Coast ports. The system combines freight forecasting, vessel–berth feasibility checks, voyage-cost estimation, risk scenarios, and explainable chartering recommendations.
+
+DockTech is designed strictly as a **decision-support platform**, not an automated charter execution system.
 
 ## Supabase Architecture
-This version uses **Supabase as the managed data and identity platform**:
-- **Supabase Auth** handles authentication and sessions.
-- **Supabase PostgreSQL** stores application and reference data.
-- **Supabase Storage** can store generated reports and uploaded files.
-- **FastAPI** remains responsible for business logic, forecasting, feasibility, recommendations, scenarios, and server-side authorization.
-- **React** uses Supabase Auth for identity/session operations but accesses application data through FastAPI APIs.
-- **Redis** remains optional for caching.
+DockTech uses **Supabase as the managed data and identity platform**:
+- **Supabase Auth** handles user identity, authentication, password security, and session management.
+- **Supabase PostgreSQL** provides relational storage for both static/slowly-changing reference data and dynamic application data.
+- **Supabase Storage** provides persistent object storage for generated decision summary reports (PDF/CSV) and report templates.
+- **FastAPI** remains the authoritative backend for business logic, ML forecasting pipelines, two-ended vessel–berth feasibility checks, multi-voyage cost estimation, risk scenarios, recommendation heuristics, and server-side authorization.
+- **React (Vite)** uses the Supabase client library exclusively for identity and session operations (sign-in, token refresh, sign-out).
+- **React must NOT directly query application or reference tables in Supabase.** All application workflows and data queries flow through FastAPI APIs.
+- **Supabase service-role credentials remain backend-only.** They are never exposed to the client or checked into source control.
+- **FastAPI verifies Supabase access tokens server-side** on every protected request before delegating to application services.
+- **Application roles (`VIEWER`, `PLANNER`, `MANAGER`, `ADMINISTRATOR`) are enforced server-side** in FastAPI dependencies and services.
+- **Row Level Security (RLS)** in PostgreSQL provides defense-in-depth database protection, but is not a substitute for FastAPI application authorization.
+- **Redis** is optional for response caching and performance-sensitive lookups, not a mandatory runtime dependency for MVP execution.
 
 ## Architecture Goals
-- Keep business logic independent of the user interface.
-- Make data sources, port constraints, vessel specifications, and model artifacts replaceable and traceable.
-- Support a fast SIH MVP while preserving a clean path to production deployment.
-- Return explainable recommendations, assumptions, and risk flags rather than opaque model outputs.
-- Keep application data access behind the FastAPI backend while using Supabase Auth for identity and session management.
+- Keep business rules, calculations, and domain models completely independent of the user interface.
+- Ensure all datasets, port limits, berth capabilities, vessel classes, fuel prices, and model artifacts are versioned, traceable, and swappable.
+- Maintain strict referential integrity, reproducible cost baselines, and failure-safe behaviors across services.
+- Deliver transparent, explainable recommendations with key drivers, material assumptions, and risk flags rather than opaque "black-box" predictions.
+- Enforce strict separation between identity management (Supabase Auth), API orchestration / authorization (FastAPI), and persistent storage (Supabase PostgreSQL / Storage).
 
 ## System Context
-The user enters cargo and planning details into the dashboard. Supabase Auth establishes identity and session state. The backend validates the authenticated request, verifies authorization, retrieves data from Supabase, runs forecasting and optimization logic, applies scenarios, and returns a recommendation with supporting calculations.
+
+The user interacts with the React frontend. Supabase Auth establishes identity and returns an access token (JWT). React attaches this token to API requests sent to FastAPI. The backend validates the token, verifies user authorization, loads data from Supabase PostgreSQL, runs forecasting and feasibility evaluations, executes scenario calculations, and returns a structured recommendation payload.
 
 ```text
-+----------------------+       HTTPS        +---------------------------+
-| Web UI / Dashboard   | <--------------->  | Backend API               |
-| React                |                    | FastAPI                   |
-+----------+-----------+                    +------------+--------------+
-           |                                             |
-           | Supabase Auth                               |
-           | session / JWT                               |
-           v                                             |
-+----------------------+                                  |
-| Supabase Auth       | <--------------------------------+
-| Identity + Sessions |
-+----------------------+                                  |
-                                                         |
-                                  +----------------------+----------------------+
-                                  |                      |                      |
-                         +--------v---------+   +--------v---------+   +--------v---------+
-                         | Auth/JWT         |   | Application      |   | Forecast &       |
-                         | verification     |   | Services        |   | Decision Engine  |
-                         +------------------+   +--------+---------+   +--------+---------+
-                                                        |                      |
-                                         +--------------v----------------------+
-                                         | Repository / Supabase Data Access  |
-                                         +----------------+-------------------+
-                                                          |
-                                      +-------------------v-------------------+
-                                      | Supabase                            |
-                                      | PostgreSQL + Auth + Storage         |
-                                      +-------------------------------------+
++------------------------+        HTTPS API Calls       +---------------------------+
+| Web Dashboard          | <--------------------------> | Backend API Service       |
+| React + Vite           |     (Bearer JWT Auth)        | FastAPI                   |
++-----------+------------+                              +-------------+-------------+
+            |                                                         |
+            | Supabase Auth                                           |
+            | login / session / JWT                                   |
+            v                                                         |
++------------------------+                                            |
+| Supabase Auth          | <------------------------------------------+
+| Identity + Sessions    |      Server-side JWT Verification
++------------------------+                                            |
+                                                                      |
+                                     +--------------------------------+--------------------------------+
+                                     |                                |                                |
+                            +--------v---------+             +--------v---------+             +--------v---------+
+                            | Auth & Role      |             | Application      |             | Forecast &       |
+                            | Dependency Guard |             | Services         |             | Decision Engine  |
+                            +------------------+             +--------+---------+             +--------+---------+
+                                                                      |                                |
+                                                       +--------------v--------------------------------+
+                                                       | Repositories / Data Access Adapters           |
+                                                       +----------------------+------------------------+
+                                                                              |
+                                                      +-----------------------v-----------------------+
+                                                      | Supabase Managed Platform                     |
+                                                      | PostgreSQL (Data) + Storage (Reports)         |
+                                                      +-----------------------------------------------+
 ```
+
+---
 
 ## Logical Layers
 
-### Presentation layer
-**Responsibilities**
-- Render forms, charts, tables, alerts, and downloadable reports.
-- Collect user input and call backend APIs.
-- Display loading, validation, error, and empty states.
-- Present explanations, assumptions, and risk warnings returned by the backend.
+### 1. Presentation Layer (`frontend/`)
+- **Technology:** React + Vite single-page application using modern Vanilla CSS design tokens.
+- **Responsibilities:**
+  - Render planning forms, forecast trend charts, vessel comparison cards, scenario adjusters, and downloadable reports.
+  - Collect user procurement parameters (commodity, parcel volume, origin, destination, delivery window, preferred contract horizon).
+  - Manage client-side session state via Supabase Auth client.
+  - Invoke backend endpoints via typed API client wrappers.
+  - Render explicit units, data freshness badges, assumptions panels, and structured error states.
+- **Does NOT do:**
+  - Direct SQL queries, ORM sessions, or Supabase PostgreSQL table reads.
+  - Secret key or service-role credential storage.
+  - Authorization decisions or role enforcement.
+  - Domain feasibility checks, voyage duration modeling, or cost calculations.
 
-**Does not do**
-- Direct database access.
-- SQL queries or ORM calls.
-- Secret handling.
-- Authorization decisions.
-- Freight calculations, forecasting, vessel feasibility, or recommendation rules.
+### 2. API Layer (`backend/app/api/`)
+- **Technology:** FastAPI REST router versioned under `/api/v1`.
+- **Responsibilities:**
+  - Define request and response schemas (Pydantic).
+  - Authenticate incoming requests by verifying Supabase access tokens.
+  - Enforce role-based access control (`VIEWER`, `PLANNER`, `MANAGER`, `ADMINISTRATOR`).
+  - Validate payload constraints and enumerations at the boundary.
+  - Delegate use cases to application services and serialize structured JSON responses.
+- **Does NOT do:**
+  - Embed complex forecasting heuristics, cost formulas, or database queries inside route handlers.
+  - Handle UI presentation concerns.
 
-### API layer
-**Responsibilities**
-- Define request and response contracts.
-- Authenticate requests and enforce authorization before protected actions.
-- Validate incoming payloads using schemas.
-- Map requests to application services.
-- Return structured, safe responses and standardized errors.
+### 3. Application / Service Layer (`backend/app/services/`)
+- **Responsibilities:**
+  - Orchestrate end-to-end business workflows.
+  - Resolve derived dependencies (e.g. resolving a `cargo_request` to its unique `route_id`).
+  - Coordinate repository queries to fetch reference constraints and time-series observations.
+  - Trigger ML forecasting inference, vessel–berth feasibility filtering, cost/turnaround estimation, and recommendation ranking.
+  - Record audit log events for governance and traceability.
+- **Key Services:**
+  - `RecommendationService`: End-to-end procurement and chartering recommendation workflow.
+  - `ForecastService`: Model inference, prediction intervals, and baseline fallback execution.
+  - `FeasibilityService`: Two-ended berth and port constraint verification.
+  - `CostEngineService`: Multi-voyage turnaround, bunker fuel calculation, and freight hire estimation.
+  - `ScenarioService`: Parameter shock evaluations (freight, bunker fuel, port delay).
+  - `ReportService`: One-page decision brief generation.
+  - `ReferenceDataService`: Ports, berths, vessel classes, and routes retrieval.
+  - `AuditService`: Governance and operational action logging.
 
-**Does not do**
-- Embed complex forecasting, cost, or optimization algorithms in route handlers.
-- Use UI-specific presentation logic.
+### 4. Domain / Business Layer (`backend/app/domain/`)
+- **Responsibilities:**
+  - Contain pure, framework-independent bulk maritime business logic.
+  - **Two-Ended Feasibility Rules:** Check vessel dimensions against commodity-specific berth constraints at both loading and discharge ports.
+  - **Multi-Voyage Planning:** Compute required voyages $\lceil \text{volume} / \text{capacity} \rceil$ and evaluate part-loading risks.
+  - **Cost & Turnaround Formulas:** Compute laden sailing duration, berth handling time, port waiting time, VLSFO fuel consumption, and freight costs.
+  - **Decision Heuristics:** Map forecast momentum, delivery deadlines, and uncertainty to market entry timing (`FIX_NOW` vs. `WAIT`) and contract strategy (`SPOT` vs. `SHORT_TERM_MULTIPLE_VOYAGE`).
+- **Design Rule:** Pure Python functions and data classes. Zero dependencies on FastAPI, React, SQL, pandas database readers, or external network clients.
 
-### Application/service layer
-**Responsibilities**
-- Coordinate business workflows.
-- Fetch and persist data through repositories.
-- Invoke forecasting, feasibility, cost, risk, and recommendation modules.
-- Enforce business rules that span more than one domain object.
-- Build the complete decision result returned to the API.
+### 5. Repository & Data Access Layer (`backend/app/repositories/` & `integrations/`)
+- **Responsibilities:**
+  - Encapsulate all database queries and mutations against Supabase PostgreSQL.
+  - Provide domain repository interfaces and implementations.
+  - Maintain the single Supabase client adapter in `backend/app/integrations/`.
+  - Handle connection management, transaction boundaries, and query filtering.
+- **Does NOT do:**
+  - Implement business policy, feasibility logic, or recommendation ranking.
+  - Expose raw database connection objects to API controllers or UI components.
 
-**Examples**
-- `RecommendationService.create_recommendation()`
-- `ForecastService.generate_forecast()`
-- `PortService.get_port_constraints()`
-- `ScenarioService.apply_scenario()`
-- `ReportService.generate_decision_summary()`
+### 6. Data Science & Model Layer (`backend/app/ml/`)
+- **Responsibilities:**
+  - Time-series feature engineering (lags, rolling averages, seasonality indicators).
+  - Train, backtest, and evaluate forecasting models (ARIMA, XGBoost, Naive persistence baseline).
+  - Model registry metadata tracking (`model_name`, `model_version`, `training_data_end_date`).
+  - Generate quantitative prediction intervals (`central_value`, `lower_value`, `upper_value`).
+  - Provide safe fallback baseline predictions when history is sparse or advanced models fail.
 
-### Domain/business layer
-**Responsibilities**
-- Hold pure, testable business logic independent of HTTP, UI, and database technology.
-- Check vessel–port compatibility.
-- Estimate voyage and turnaround time.
-- Compute cost-per-tonne comparison.
-- Rank vessel alternatives.
-- Derive market-entry recommendation and risk flags.
+---
 
-**Design preference**
-- Functions in this layer should accept typed inputs and return typed outputs.
-- Domain code should be deterministic wherever possible; external data fetching belongs outside it.
+## Important Domain Relationships & Feasibility Hierarchy
 
-### Data access layer
-**Responsibilities**
-- Encapsulate all database/file-store access.
-- Provide repository interfaces and implementations.
-- Convert persistence models to domain/application objects.
-- Handle transactions, query efficiency, and data-source details.
+### Feasibility Hierarchy
+DockTech enforces a strict three-tier physical constraint hierarchy:
 
-**Does not do**
-- Return raw database concerns directly to UI components.
-- Implement chartering recommendation policy.
+```text
+Port Planning Envelope (Screening Layer)
+       ↓
+Berth Physical & Commodity Limits (Authoritative Operational Layer)
+       ↓
+Commodity-Specific Vessel Feasibility (Origin AND Destination)
+```
 
-### Data science and model layer
-**Responsibilities**
-- Prepare datasets and features.
-- Train, validate, version, and load forecasting models.
-- Generate point forecasts and uncertainty ranges.
-- Log model/data versions and evaluation metrics.
+1. **`ports` (Planning Envelope):** Defines macro-level maximum limits (`max_loa_m`, `max_beam_m`, `max_draft_m`). Serves as an early screening layer. It does **not** guarantee berth feasibility.
+2. **`berths` (Authoritative Operational Layer):** Defines actual terminal physical constraints and commodity specialization (`commodity = 'THERMAL_COAL' | 'COKING_COAL'`). A vessel is feasible at a port if and only if at least one berth handling the requested commodity can accommodate the vessel's LOA, beam, and draft.
+3. **Two-Ended Feasibility Rule:** A vessel class is operationally feasible if and only if it is compatible at **both** the origin loading port and destination discharge port.
+4. **No Invented Compatibility:** If a port has no berth record for the requested commodity, the engine must fail safely with `INSUFFICIENT_FEASIBILITY_DATA` rather than inventing a generic berth.
+5. **Recommendation Integrity:** The recommendation engine must **never** recommend a vessel class rejected by feasibility.
 
-**MVP approach**
-- Use a baseline model and one improved model.
-- Keep inference behind a stable `ForecastService` interface so models can change without changing the UI or API contract.
+### Supporting Reference Data Roles
+- **`port_activity`:** Supplies time-varying observed waiting hours and congestion ratings. In V1, waiting hours for cost estimation are strictly queried from `port_activity.average_waiting_hours` on or before the cost reference date.
+- **`fuel_prices`:** Supplies bunker fuel market prices. Sea-going transit fuel cost is calculated using **VLSFO only**, retrieved on or before the cost reference date.
+- **`scenario_defaults`:** Supplies predefined parameter shock presets (`BASELINE`, `ADVERSE`, `FAVORABLE`).
 
-## Major Components
+---
 
-### Dashboard
-The dashboard is the interaction point for chartering managers. It includes: 
-- Cargo planning form: commodity, cargo volume, origin, destination, delivery window, and contract horizon.
-- Freight forecast panel: historical values, forecast trend, and low/base/high range.
-- Vessel comparison panel: feasibility, capacity fit, estimated turnaround, cost per tonne, and risk.
-- Recommendation card: fix now / wait / consider multi-voyage contract, with reason.
-- Scenario panel: freight-rate shock and congestion delay controls.
-- Report export action.
+## Cost & Turnaround Architecture (V1 Semantics)
 
-### Authentication and authorization
-Supabase Auth establishes identity and manages authenticated sessions. FastAPI remains responsible for validating Supabase access tokens and enforcing application-level authorization.
+Detailed mathematical formulas are defined in `DATA_DICTIONARY.md`. At the architectural level, the cost and operational engines adhere to these core principles:
 
-**MVP**
-- Use Supabase Auth for email/password authentication and session management.
-- React uses the Supabase client for sign-in/sign-out and maintains the authenticated session.
-- FastAPI verifies the Supabase access token on every protected request.
-- Store application roles/profile metadata in Supabase and enforce role checks server-side.
-- Keep Supabase service-role keys and other secrets only in backend environment variables.
+1. **Multi-Voyage Parcel Handling:**
+   - When requested cargo volume exceeds vessel payload capacity, the engine calculates:
+     $$\text{required\_voyages} = \left\lceil \frac{\text{cargo\_volume\_mt}}{\text{cargo\_capacity\_mt}} \right\rceil$$
+   - Total shipment turnaround (`recommendations.estimated_turnaround_hours`) accounts for handling total cargo volume across berths plus waiting time and scenario delays on **every voyage call**.
+2. **Definition of Vessel-Days & Port-Days:**
+   - Per-voyage turnaround hours are converted to port days:
+     $$\text{port\_days\_per\_voyage} = \frac{\text{turnaround\_hours\_per\_voyage}}{24}$$
+     $$\text{vessel\_days\_per\_voyage} = \text{sailing\_days} + \text{port\_days\_per\_voyage}$$
+3. **Freight Hire vs. Total Cost:**
+   - **`USD_PER_DAY` Freight:** Waiting and handling times directly expand `port_days_per_voyage` and `vessel_days_per_voyage`, and are therefore accounted for within charter hire freight cost.
+   - **`USD_PER_MT` Freight:** Waiting time impacts turnaround duration, delivery window feasibility, and operational risk (`risk_level`), but V1 does **not** calculate an arbitrary separate idle/demurrage monetary charge because no explicit demurrage-rate parameter exists in the V1 schema. Total cost must not invent uncalibrated idle charges.
+4. **Reproducible Cost Reference Date:**
+   - All reference observations for bunker fuel (VLSFO) and port waiting times use a deterministic cost reference date:
+     $$\text{cost\_reference\_date} = \text{forecast\_run}.\text{training\_data\_end\_date}$$
+   - This ensures cost estimates and recommendations are 100% reproducible and independent of the execution timestamp.
 
-**Production direction**
-- Use Supabase Auth with enterprise SSO/OIDC where required.
-- Enforce role-based access control (RBAC): `viewer`, `planner`, `manager`, `administrator`.
-- Maintain audit records for saved scenarios, configuration changes, and exports.
-
-### Reference-data management
-Reference data consists of port constraints, vessel specifications, route assumptions, and commodity defaults.
-
-**MVP storage**
-- Store operational/reference data in Supabase PostgreSQL.
-- Keep version-controlled seed CSV/JSON files for reproducible initialization and fallback/reference inputs.
-- Each record must include source, effective date, unit, and data-quality/proxy label.
-
-**Production direction**
-- Administration workflow with approval and audit trail.
-- Data validation rules and effective-dating for port notices.
-
-### Forecasting engine
-- Receives route/vessel-class context and forecast horizon.
-- Loads selected model artifact and latest feature values.
-- Returns historical observations, forecast timestamps, central estimate, lower bound, upper bound, model version, and data recency.
-- Supports a fallback baseline when an advanced model or required data is unavailable.
-
-### Feasibility and optimization engine
-- Applies origin and destination restrictions to candidate vessel classes.
-- Rejects options that exceed draft, LOA, or beam limits.
-- Estimates sailing duration, port handling duration, waiting time, total cost, and cost per tonne.
-- Ranks feasible alternatives and produces explanation codes.
-
-### Recommendation engine
-Combines forecast, operational feasibility, delivery urgency, expected cost, and scenario results to produce a decision-support recommendation.
-
-**Output contract**
-- Recommended action.
-- Recommended vessel class/range.
-- Ranked alternatives.
-- Expected cost range and turnaround.
-- Risk flags and confidence/uncertainty.
-- Plain-language rationale.
-- Assumptions and data/model version metadata.
-
-## End-to-End Request Flow
-
-### Generate a recommendation
-1. User signs in through Supabase Auth from the dashboard.
-2. UI sends a `POST /api/v1/recommendations` request containing cargo and planning input.
-3. API verifies the Supabase access token server-side and checks role permissions.
-4. API validates the request schema.
-5. `RecommendationService` loads ports, vessel options, route assumptions, and relevant freight series through repositories.
-6. The feasibility engine filters invalid vessels and computes operational estimates.
-7. `ForecastService` generates the selected freight forecast and uncertainty range.
-8. The cost and recommendation engines rank feasible options and determine recommended timing/action.
-9. API returns a structured recommendation payload.
-10. UI renders returned data only; it does not reproduce domain calculations.
-
-### Apply a scenario
-1. User changes freight-shock or congestion-delay controls.
-2. UI sends scenario parameters and the planning input to `POST /api/v1/scenarios/evaluate`.
-3. Backend authenticates, validates, calculates the scenario, and returns updated costs, recommendation, and risk flags.
-4. UI updates the comparison and explanation.
-
-## API Design
-All endpoints are versioned under `/api/v1`. API route handlers remain thin: authenticate, validate, invoke a service, and serialize response.
-
-| Endpoint | Method | Purpose | Required Role |
-|---|---:|---|---|
-| `/auth/me` | GET | Return current authenticated user/profile | Authenticated |
-| `/ports` | GET | List supported ports and public planning metadata | Authenticated |
-| `/vessels` | GET | List vessel classes/specifications | Authenticated |
-| `/routes` | GET | List supported route definitions | Authenticated |
-| `/forecasts` | POST | Return a route/vessel forecast | Planner/Manager |
-| `/recommendations` | POST | Generate end-to-end chartering recommendation | Planner/Manager |
-| `/scenarios/evaluate` | POST | Recalculate recommendation under a scenario | Planner/Manager |
-| `/reports/recommendation` | POST | Generate decision report | Planner/Manager |
-| `/admin/ports` | POST/PATCH | Create/update port reference data | Administrator |
-| `/admin/vessels` | POST/PATCH | Create/update vessel reference data | Administrator |
+---
 
 ## Core Domain Data Model
 
-### Main entities
-| Entity | Purpose | Key fields |
+The data contract is canonically specified in `DATA_DICTIONARY.md`. ARCHITECTURE.md summarizes the entities and their architectural responsibilities:
+
+### 1. Reference Datasets (Seeded from `data/reference/*.csv`)
+| Entity / Dataset | Architectural Role | Key Attributes |
 |---|---|---|
-| `UserProfile` | Application profile linked to Supabase Auth user | id, auth_user_id, name, email, role, status |
-| `Port` | Origin/destination port reference data | id, name, country, max_draft_m, max_loa_m, max_beam_m, handling_rate_tpd, effective_from, source |
-| `VesselClass` | Typical vessel characteristics | id, name, dwt_min, dwt_max, draft_m, loa_m, beam_m, speed_knots, geared |
-| `Route` | Origin–destination planning route | id, origin_port_id, destination_port_id, distance_nm, route_notes |
-| `FreightSeries` | Observed/proxy freight data | id, route_id, vessel_class_id, date, rate, currency, unit, source, quality_label |
-| `ForecastRun` | Traceable forecast output | id, series_id, horizon, model_version, generated_at, data_as_of |
-| `ForecastPoint` | Forecast value by date/quantile | forecast_run_id, date, p10, p50, p90 |
-| `CargoRequest` | User planning input | id, commodity, quantity_tonnes, origin_port_id, destination_port_id, delivery_start, delivery_end, contract_horizon |
-| `Scenario` | User-adjustable planning assumption | id, freight_shock_pct, congestion_delay_days, fuel_shock_pct |
-| `Recommendation` | Stored decision result | id, cargo_request_id, action, selected_vessel_id, cost_low, cost_base, cost_high, rationale, created_at |
-| `AuditLog` | Security and governance trace | id, user_id, action, entity, entity_id, timestamp, metadata |
+| `Port` / `ports` | Macro port planning envelope & baseline turnaround | `port_id`, `port_name`, `country`, `max_loa_m`, `max_beam_m`, `max_draft_m`, `handling_rate_tpd`, `typical_turnaround_hours`, `source`, `data_type` |
+| `Berth` / `berths` | Authoritative physical & commodity constraints | `berth_id`, `port_id`, `berth_name`, `commodity`, `max_loa_m`, `max_beam_m`, `max_draft_m`, `handling_rate_tpd`, `source`, `data_type` |
+| `VesselClass` / `vessel_classes` | Vessel catalog, dimensions, capacity, fuel burn | `vessel_class_id`, `vessel_class_name`, `dwt_min_mt`, `dwt_max_mt`, `loa_m`, `beam_m`, `draft_m`, `speed_knots`, `cargo_capacity_mt`, `fuel_consumption_mt_day`, `source`, `data_type` |
+| `Route` / `routes` | Trade lanes, nautical distance, baseline days | `route_id`, `origin_port_id`, `destination_port_id`, `commodity`, `distance_nm`, `typical_sailing_days`, `source`, `data_type` |
+| `FreightRate` / `freight_rates` | Historical/synthetic freight rates for ML & trends | `freight_rate_id`, `observation_date`, `route_id`, `vessel_class_id`, `freight_value`, `freight_unit`, `currency`, `source`, `data_type` |
+| `CommodityPrice` / `commodity_prices` | Macro coal benchmark prices for market context | `commodity_price_id`, `observation_date`, `commodity`, `market`, `price_value`, `currency`, `unit`, `source`, `data_type` |
+| `FuelPrice` / `fuel_prices` | Marine bunker fuel prices (VLSFO, MGO) | `fuel_price_id`, `observation_date`, `fuel_type`, `price_value`, `currency`, `unit`, `source`, `data_type` |
+| `PortActivity` / `port_activity` | Observed waiting hours and daily congestion | `activity_id`, `observation_date`, `port_id`, `vessel_arrivals`, `average_waiting_hours`, `average_turnaround_hours`, `congestion_level`, `source`, `data_type` |
+| `ScenarioDefault` / `scenario_defaults` | Presets for scenario evaluation | `scenario_id`, `scenario_name`, `freight_change_pct`, `fuel_change_pct`, `delay_hours`, `port_congestion_level`, `description`, `source`, `data_type` |
 
-### Relationships
+### 2. Application Tables (Managed in Supabase PostgreSQL at Runtime)
+| Entity / Table | Architectural Role | Key Attributes |
+|---|---|---|
+| `UserProfile` / `user_profiles` | Profile linked to Supabase Auth `auth.users` | `user_id`, `auth_user_id`, `display_name`, `email`, `role`, `created_at`, `updated_at` |
+| `CargoRequest` / `cargo_requests` | User shipment procurement requirement | `cargo_request_id`, `user_id`, `commodity`, `cargo_volume_mt`, `origin_port_id`, `destination_port_id`, `earliest_delivery_date`, `latest_delivery_date`, `contract_horizon`, `created_at` |
+| `ForecastRun` / `forecast_runs` | ML execution run metadata, model version, unit | `forecast_run_id`, `cargo_request_id`, `route_id`, `vessel_class_id`, `freight_unit`, `model_name`, `model_version`, `training_data_end_date`, `created_at` |
+| `ForecastPoint` / `forecast_points` | Quantitative time-series predictions & bounds | `forecast_point_id`, `forecast_run_id`, `forecast_date`, `central_value`, `lower_value`, `upper_value`, `unit` |
+| `Scenario` / `scenarios` | User-adjusted scenario simulations & cost outputs | `scenario_instance_id`, `cargo_request_id`, `scenario_type`, `freight_change_pct`, `fuel_change_pct`, `delay_hours`, `congestion_level`, `estimated_total_cost`, `risk_level`, `created_at` |
+| `Recommendation` / `recommendations` | Decision-support chartering output & rationale | `recommendation_id`, `cargo_request_id`, `forecast_run_id`, `recommended_vessel_class_id`, `market_entry_action`, `contract_strategy`, `expected_freight_cost`, `expected_total_cost`, `estimated_turnaround_hours`, `risk_level`, `confidence`, `rationale`, `assumptions`, `created_at` |
+| `AuditLog` / `audit_logs` | Traceable governance and compliance event log | `audit_log_id`, `user_id`, `action`, `entity_type`, `entity_id`, `details`, `created_at` |
+
+### 3. Entity Relationships
 ```text
-Port (origin) ----+
-                 |--> Route --> FreightSeries --> ForecastRun --> ForecastPoint
-Port (destination)+
+ports (origin) ───────┐
+                      ├──→ routes ────→ freight_rates
+ports (destination) ──┘        │               ↑
+                               │         vessel_classes
+ports ──→ berths               │               │
+ports ──→ port_activity        │               │
+                               ↓               ↓
+                    cargo_requests ──→ forecast_runs ──→ forecast_points
+                         │                    │
+                         ├──→ scenarios       │
+                         │                    │
+                         └──→ recommendations ←┘
+                               ↑
+                         vessel_classes
 
-CargoRequest --> Recommendation
-CargoRequest --> Scenario
-VesselClass --> FreightSeries
-VesselClass --> Recommendation
-User --> CargoRequest / Scenario / AuditLog
+user_profiles ──→ cargo_requests
+user_profiles ──→ audit_logs
 ```
 
-## Folder Structure
-This structure uses a Python FastAPI backend and a React frontend. The frontend is a separate web application that communicates with the backend through APIs.
+---
+
+## Synthetic Data Architecture & Provenance
+
+To support development, testing, and SIH demonstration without relying on inaccessible real-world commercial data feeds, V1 uses synthetic reference datasets.
+
+```text
+Synthetic Data Generator (scripts/generate_synthetic_data.py)
+        ↓
+data/reference/*.csv (Version-controlled CSV seeds)
+        ↓
+Validation Suite (scripts/validate_reference_data.py)
+        ↓
+Database Seeder (scripts/seed_database.py)
+        ↓
+Supabase PostgreSQL Reference Tables
+        ↓
+FastAPI Repositories & Application Services
+        ↓
+Domain Feasibility, ML Forecasting, & Decision Engine
+```
+
+### Governance Rules for Synthetic Data:
+1. **Provenance Metadata:** Every synthetic record carries `source = 'SYNTHETIC_GENERATOR_V1'` and `data_type = 'SYNTHETIC'`.
+2. **No False Authority:** Synthetic constraints, route distances, handling rates, and freight rates must never be presented in the UI or documentation as official port limits or certified market quotes.
+3. **Seamless Transition Path:** The database schema and repository interfaces are designed so that future actual feeds (e.g. Baltic Exchange indices, Clarksons data, live port notices) can be ingested with `data_type = 'ACTUAL'` or `'PROXY'` without modifying any table schema, column names, or foreign keys.
+
+---
+
+## Target Folder Structure
 
 ```text
 docktech/
 ├── README.md
 ├── PRD.md
 ├── ARCHITECTURE.md
+├── DESIGN.md
+├── RULES.md
+├── DATA_DICTIONARY.md
 ├── .env.example
 ├── .gitignore
-├── docker-compose.yml
-├── Makefile
-├── docs/
-│   ├── api-contracts.md
-│   ├── data-dictionary.md
-│   ├── model-card.md
-│   ├── assumptions.md
-│   └── demo-script.md
+│
 ├── data/
-│   ├── raw/
-│   ├── processed/
 │   ├── reference/
 │   │   ├── ports.csv
+│   │   ├── berths.csv
 │   │   ├── vessel_classes.csv
 │   │   ├── routes.csv
-│   │   └── commodity_defaults.csv
-│   └── sample/
+│   │   ├── freight_rates.csv
+│   │   ├── commodity_prices.csv
+│   │   ├── fuel_prices.csv
+│   │   ├── port_activity.csv
+│   │   └── scenario_defaults.csv
+│   └── README.md
+│
 ├── models/
 │   ├── artifacts/
-│   ├── metadata/
-│   └── training/
+│   └── metadata/
+│
 ├── backend/
 │   ├── pyproject.toml
 │   ├── requirements.txt
@@ -340,6 +343,7 @@ docktech/
 │   │   ├── repositories/
 │   │   │   ├── base.py
 │   │   │   ├── port_repository.py
+│   │   │   ├── berth_repository.py
 │   │   │   ├── vessel_repository.py
 │   │   │   ├── route_repository.py
 │   │   │   ├── freight_repository.py
@@ -356,14 +360,6 @@ docktech/
 │   │   │   ├── inference.py
 │   │   │   ├── registry.py
 │   │   │   └── fallback.py
-│   │   ├── integrations/
-│   │   │   ├── supabase_client.py
-│   │   │   ├── supabase_auth.py
-│   │   │   ├── storage_client.py
-│   │   │   ├── freight_data_client.py
-│   │   │   ├── commodity_data_client.py
-│   │   │   ├── weather_data_client.py
-│   │   │   └── ports_data_client.py
 │   │   └── utils/
 │   │       ├── dates.py
 │   │       ├── units.py
@@ -376,6 +372,7 @@ docktech/
 │       ├── integration/
 │       ├── api/
 │       └── fixtures/
+│
 ├── frontend/
 │   ├── package.json
 │   ├── package-lock.json
@@ -435,167 +432,144 @@ docktech/
 │   │       ├── pages/
 │   │       └── api/
 │   └── README.md
+│
 ├── scripts/
-│   ├── ingest_data.py
+│   ├── generate_synthetic_data.py
 │   ├── validate_reference_data.py
+│   ├── seed_database.py
 │   ├── train_model.py
-│   ├── evaluate_model.py
-│   └── seed_database.py
+│   └── evaluate_model.py
+│
 └── infra/
     ├── Dockerfile.backend
     ├── Dockerfile.frontend
-    ├── nginx/
     └── deployment/
 ```
 
+---
+
 ## Folder Responsibilities
 
-### `frontend/src/components/`
-Contains reusable UI widgets and layouts only. Components receive values and callbacks or API-ready data; they do not import database modules, ORM models, or server secrets.
+### `backend/app/api/`
+FastAPI route controllers. Thin handlers responsible for HTTP parameter mapping, dependency injection, authentication verification, request schema validation, and response serialization. Delegates all business workflows to `services/`.
 
-### `frontend/src/api/`
-Contains frontend HTTP client wrappers. A React component or page calls an API module, which calls a backend API. These files must never connect directly to Supabase data tables, backend repositories, CSV reference stores, or model artifact stores. Supabase Auth is used only for identity/session operations.
+### `backend/app/schemas/`
+Pydantic data validation schemas for incoming requests and serialized responses. Enforces strict types, bounds, and controlled vocabulary enumerations at the API boundary.
 
-### `backend/api/`
-Contains HTTP endpoints, dependency injection, and response serialization. API handlers must delegate all business workflow logic to `backend/services/`.
+### `backend/app/domain/`
+Core bulk chartering business models, feasibility matrices, cost calculation engines, multi-voyage estimators, ranking heuristics, and risk models. Pure Python, testable without network, database, or UI dependencies.
 
-### `backend/services/`
-Contains use-case orchestration and persistence operations through repositories/Supabase data-access integrations. A service may call repositories and pure domain modules. It must not contain React rendering code.
+### `backend/app/services/`
+Application use-case coordinators. Manages transactions, fetches required constraints from repositories, triggers domain calculations, calls ML inference pipelines, constructs recommendation outputs, and writes audit records.
 
-### `backend/repositories/`
-Contains all Supabase queries and persistence operations. Repositories do not decide business policy; they retrieve and store data.
+### `backend/app/repositories/`
+Persistence abstractions managing queries to Supabase PostgreSQL. Enforces relational integrity, handles parameterized filtering, and converts persistence rows to domain objects.
 
-### `backend/domain/`
-Contains pure business logic. It must not import FastAPI, React, SQLAlchemy sessions, file clients, or HTTP clients.
+### `backend/app/integrations/`
+**Exactly one integrations directory** containing infrastructure adapters:
+- `supabase_client.py`: Singleton Supabase PostgreSQL client initialization.
+- `supabase_auth.py`: Server-side JWT token validation and public key verification.
+- `storage_client.py`: Supabase Storage adapter for report artifact persistence.
+External live ingestion clients (weather, AIS, live broker feeds) are deferred and excluded from the active V1 tree.
 
-### `backend/ml/`
-Contains model-training and inference code. It should return stable domain-friendly structures rather than UI-specific chart data.
+### `backend/app/ml/`
+Machine learning forecasting sub-system. Contains feature engineering, model training routines, evaluation scripts, runtime inference logic, model registry metadata management, and baseline persistence fallback models.
+
+### `frontend/src/`
+React + Vite presentation layer:
+- `api/`: Typed HTTP client wrappers calling FastAPI endpoints. Does not access Supabase tables directly.
+- `components/`: Reusable, modular UI widgets (charts, tables, parameter forms, badges, alert cards).
+- `pages/`: Page-level route views composing layout and domain components.
+- `context/` & `hooks/`: Authentication state management (via Supabase Auth client) and custom data hooks.
+- `styles/`: Canonical design system tokens and responsive styles (Vanilla CSS).
+
+---
+
+## API Design
+
+All endpoints are versioned under `/api/v1`. Route handlers remain thin, delegating execution to the appropriate service.
+
+| Endpoint | Method | Purpose | Required Role |
+|---|---:|---|---|
+| `/auth/me` | GET | Return current authenticated user profile & role | Authenticated |
+| `/ports` | GET | List supported ports and planning constraints | Authenticated |
+| `/vessels` | GET | List vessel classes and technical specifications | Authenticated |
+| `/routes` | GET | List supported origin–destination trade lanes | Authenticated |
+| `/forecasts` | POST | Generate freight rate forecast for route & vessel class | `PLANNER`, `MANAGER`, `ADMINISTRATOR` |
+| `/recommendations` | POST | Run full feasibility, cost ranking, and chartering recommendation | `PLANNER`, `MANAGER`, `ADMINISTRATOR` |
+| `/scenarios/evaluate` | POST | Evaluate recommendation sensitivity under parameter shocks | `PLANNER`, `MANAGER`, `ADMINISTRATOR` |
+| `/reports/recommendation` | POST | Generate downloadable decision summary brief | `PLANNER`, `MANAGER`, `ADMINISTRATOR` |
+| `/admin/ports` | POST/PATCH | Manage port reference constraints | `ADMINISTRATOR` |
+| `/admin/vessels` | POST/PATCH | Manage vessel class reference specifications | `ADMINISTRATOR` |
+
+---
 
 ## Architectural Rules
-These rules are mandatory for all contributors.
 
-### Separation of concerns
-1. **UI components must not contain database logic.** No SQL, ORM session, repository import, direct CSV/Parquet read, or database connection may appear in `frontend/` UI code.
-2. **Database operations belong in backend services and repositories.** Services own use-case workflows; repositories own Supabase query/persistence details. API routes and UI components must not access Supabase data tables directly.
-3. **Business logic must remain separate from UI.** Forecasting, vessel feasibility, cost calculation, ranking, and recommendations belong in `backend/domain/` and `backend/services/`, never in React components, pages, or render functions.
-4. **Reusable UI belongs in `frontend/components/`.** Do not duplicate forms, charts, badges, cards, or tables across pages. Pages compose reusable components.
-5. **API routes must remain thin.** Route handlers authenticate, validate, call a service, and serialize a response. They must not contain complex calculations, direct SQL, or large branching business rules.
-6. **Domain logic must be framework-independent.** `backend/domain/` cannot import FastAPI, React, SQLAlchemy, pandas database readers, or external API clients.
-7. **Model logic must be swappable.** Business services depend on a forecast interface, not on a particular model library or serialized model format.
+1. **Separation of Concerns:** UI components must never contain SQL queries, repository calls, direct Supabase table queries, or secret keys.
+2. **FastAPI Authorization Boundary:** React uses Supabase Auth for login, but FastAPI verifies the Supabase access token server-side on every protected API call and enforces application roles (`VIEWER`, `PLANNER`, `MANAGER`, `ADMINISTRATOR`).
+3. **No Direct UI Database Access:** The React frontend must never read or write Supabase PostgreSQL application or reference tables directly. All queries pass through FastAPI.
+4. **Thin Route Handlers:** API routes only authenticate, validate inputs via Pydantic, call a service, and serialize outputs.
+5. **Framework-Independent Domain Logic:** `backend/app/domain/` must never import FastAPI, React, SQLAlchemy sessions, or HTTP clients.
+6. **Swappable ML Models:** Business services interact with the forecasting engine through a unified interface (`ForecastService`), enabling seamless model updates without API contract changes.
+7. **Two-Ended Feasibility Precedence:** Port constraints serve as an initial screening envelope, but berth constraints are authoritative. A vessel must have at least one compatible berth for the requested commodity at both origin and destination.
+8. **Multi-Voyage Cost Accounting:** Calculations must account for required voyages ($\lceil \text{volume} / \text{capacity} \rceil$). For `USD_PER_DAY` rates, turnaround and waiting time expand vessel days and charter hire cost; for `USD_PER_MT`, waiting impacts risk and turnaround, but no artificial idle cost is fabricated.
+9. **Reproducible Reference Dates:** Cost estimations and reference-data lookups use `cost_reference_date = forecast_run.training_data_end_date` for deterministic reproducibility.
+10. **Data Provenance:** Every reference record must carry `source` and `data_type`. Synthetic data must never be presented as official commercial figures.
+11. **Fail-Safe Behavior:** Missing routes, missing berths, missing fuel prices, or sparse freight histories must produce structured errors (e.g., `ERROR_ROUTE_NOT_FOUND`, `INSUFFICIENT_FEASIBILITY_DATA`, `ERROR_INSUFFICIENT_FUEL_PRICE_DATA`) rather than hallucinated estimates.
+12. **Secret Isolation:** Supabase service-role keys, database passwords, and JWT secrets reside exclusively in backend environment variables. React only receives the public Supabase URL and anon client key.
+13. **Input Validation:** All inputs at the API boundary are validated against strict Pydantic schemas and controlled enumerations.
+14. **Safe Logging:** Never write passwords, auth tokens, personally identifiable information, or commercial secrets to application logs.
+15. **Explicit Units:** All numeric values must be accompanied by explicit units matching `DATA_DICTIONARY.md`.
+16. **No Production Data in Version Control:** Never commit secrets, real fixture contracts, or heavy binary model artifacts into Git.
+17. **Time-Aware ML Splits:** Model training and evaluation must use chronological train/validation splits to prevent future-data leakage.
+18. **Explainability First:** Every recommendation must return plain-language rationale, key decision drivers, material assumptions, and risk ratings.
+19. **Unit Test Coverage:** Pure domain rules (feasibility, multi-voyage cost, ranking heuristics) must be covered by comprehensive unit tests requiring no database or network.
+20. **Integration Testing:** Service and repository workflows must be validated using integration tests against test databases.
+21. **Single Integrations Adapter:** Infrastructure integrations must be centralized in a single `backend/app/integrations/` directory.
+22. **No Overengineered Infrastructure in V1:** Weather routing, real-time AIS telemetry, live broker messaging, and production temporal port notice tables are deferred to future roadmap phases.
+23. **Idempotent Data Seeding:** Database seeding scripts must support upsert operations to allow safe, repeatable execution in development and staging environments.
+24. **Structured Error Schema:** API errors return standardized payloads containing `code`, `message`, and optional `details`.
+25. **Single Source of Truth:** `PRD.md` defines product requirements; `DATA_DICTIONARY.md` defines schemas, units, and formulas; `ARCHITECTURE.md` defines software structure and layer interactions.
 
-### Authentication and security
-8. **Authentication must use Supabase Auth and be verified server-side.** React may initiate Supabase Auth sign-in/sign-out and maintain the client session, but FastAPI verifies the Supabase access token on every protected request.
-9. **Authorization must be enforced server-side.** Role checks occur in backend dependencies/services using the authenticated Supabase user/profile before returning protected data or modifying reference data.
-10. **Never send secrets to the client.** Supabase service-role keys, database credentials, signing secrets, and vendor tokens remain in backend environment variables or secret managers. Only the public Supabase URL and publishable/anon client key may be exposed to React.
-11. **Do not implement password storage in FastAPI.** Supabase Auth owns credential storage and authentication flows; the application stores only the profile/role data it needs.
-12. **Validate all inputs at the API boundary.** Use typed schemas, allowed ranges, and controlled enumerations for ports, vessel classes, volumes, and dates.
-13. **Log safely.** Do not write tokens, passwords, personally identifiable information, or confidential commercial terms to logs.
-
-### Data and model governance
-14. **Every external dataset must have provenance.** Store source, retrieval date, units, route/vessel context, and actual/proxy/simulated quality label.
-15. **Do not silently manufacture data.** If data is unavailable, show a warning, use an explicit documented fallback, or fail safely.
-16. **Keep raw data immutable.** Transformations create processed datasets; never overwrite raw source extracts.
-17. **Version models and features.** Every forecast response records model version, data-as-of time, and feature/data version where possible.
-18. **Separate training from inference.** Training scripts do not run automatically inside normal API request handling.
-19. **Use time-aware evaluation.** Forecast validation must use chronological splits and avoid leakage from future observations.
-20. **Expose assumptions.** Recommendations must carry the constraints, rates, scenario inputs, and uncertainty information used to generate them.
-
-### Quality and testing
-21. **Write unit tests for pure domain rules.** Test vessel feasibility, turnaround, cost calculation, ranking, and recommendation policy without requiring a database or UI.
-22. **Write integration tests for services/repositories.** Verify data retrieval, persistence, authorization, and end-to-end workflows.
-23. **Use contract tests for APIs.** Validate request/response schema compatibility between frontend and backend.
-24. **No production data in source control.** Keep sensitive data, large model artifacts, and secrets out of Git.
-25. **Fail visibly and safely.** Unsupported routes, outdated port data, missing models, and invalid inputs must produce clear errors/warnings instead of guessed recommendations.
-
-## Dependency Direction
-Dependencies should point inward toward stable business logic.
-
-```text
-Frontend UI -> Frontend API Client -> Backend API -> Services -> Domain
-                                              |          |
-                                              v          v
-                                         Repositories   ML/Integrations
-                                              |
-                                              v
-                                           Database
-```
-
-Allowed dependencies:
-- React components/pages may depend on frontend API modules, hooks, context, and presentation utilities.
-- API handlers may depend on schemas, auth dependencies, and application services.
-- Services may depend on repositories, domain modules, ML interfaces, and integrations.
-- Repositories may depend on Supabase data-access clients/integration modules only.
-- Domain modules may depend only on standard library/shared typed domain structures.
-
-Disallowed dependencies:
-- Frontend/React UI to database/repositories.
-- Domain to UI, API framework, database, or external network clients.
-- Repositories to React/FastAPI route handlers.
-- API handlers to direct Supabase data queries except controlled authentication/dependency setup.
-
-## Error Handling
-- Use structured error responses: `code`, `message`, `details`, and optional `trace_id`.
-- Use domain-specific errors such as `UnsupportedRouteError`, `NoFeasibleVesselError`, `InsufficientDataError`, and `UnauthorizedError`.
-- The backend maps internal errors to safe client-facing messages.
-- The UI shows actionable errors and never exposes stack traces, secrets, or internal infrastructure details.
-
-## Observability
-### MVP
-- Structured application logs.
-- Request ID/trace ID for API calls.
-- Record forecast model version, data-as-of date, and scenario inputs with a recommendation.
-- Basic error monitoring and health endpoint.
-
-### Production direction
-- Metrics for latency, error rate, forecast failures, missing-data rate, and recommendation usage.
-- Data-quality monitoring for stale or missing freight series and port parameters.
-- Model drift/performance monitoring after actual outcomes become available.
-- Audit logs for reference-data updates, exports, and sensitive planning actions.
+---
 
 ## Deployment Architecture
 
-### SIH MVP
+### SIH MVP Architecture
 ```text
-Browser
-  -> React frontend
-  -> Supabase Auth (identity/session)
-  -> FastAPI backend
-  -> Supabase PostgreSQL / Storage
-  -> Redis cache (if enabled)
-  -> Local/reference files + model artifacts
+User Browser
+    ↓
+React + Vite Frontend (SPA)
+    ↓
+Supabase Auth (Identity & JWT Session)
+    ↓
+FastAPI Backend API (Business Logic & ML Orchestration)
+    ↓
+Supabase Managed Platform (PostgreSQL Data & Storage Artifacts)
+    ↓
+Optional Redis Cache (Performance optimization, if enabled)
 ```
 
-### Production target
-```text
-Users
-  -> HTTPS Load Balancer / Reverse Proxy
-  -> React Frontend Service
-  -> Supabase Auth
-  -> FastAPI Backend API Service
-  -> Supabase PostgreSQL / Storage
-  -> Redis Cache
-  -> Scheduled data ingestion and model retraining jobs
-  -> Licensed market-data and SAIL enterprise integrations
-```
+- **Seed Data & Artifacts:** Version-controlled reference CSVs (`data/reference/*.csv`) and model metadata (`models/metadata/`) reside in the repository and are deployed with backend/data services.
+- **Secrets Management:** Managed exclusively through environment variables (`.env`).
 
-Production services should run in containers, receive configuration through environment variables or a secret manager, use managed database backups, and be protected by network controls and HTTPS.
+### Production Direction
+In future production deployments:
+- Containerized deployment using Docker across services (`Dockerfile.backend`, `Dockerfile.frontend`).
+- Reverse proxy / load balancer terminating HTTPS.
+- Managed Supabase Enterprise project with automated daily backups and point-in-time recovery.
+- Scheduled asynchronous background workers for data ingestion and model retraining.
+- Enterprise SSO/OIDC integration through Supabase Auth.
 
-## Development Workflow
-1. Define or update request/response schema before changing UI behavior.
-2. Implement or update pure domain logic with unit tests.
-3. Add repository/service behavior with integration tests.
-4. Expose it through a thin API endpoint.
-5. Build/reuse UI components that call the API through frontend services.
-6. Test the full workflow with representative and infeasible scenarios.
-7. Update data dictionary, assumptions, and model card when data/model behavior changes.
+---
 
 ## Definition of Done
-A feature is complete only when:
-- Its business rule is implemented outside the UI.
-- Protected operations are authenticated and authorized server-side.
-- Supabase data access is performed through services/repositories, not UI or route-handler queries.
-- Input validation and error states are implemented.
-- Unit/integration/API tests relevant to the change pass.
-- Assumptions, source metadata, and user-facing explanations are visible where relevant.
-- The feature does not expose secrets, commercial data, or raw internal errors.
-
+A feature or pull request is complete only when:
+- Its business logic is implemented in `backend/app/domain/` or `services/`, completely outside UI rendering.
+- Protected operations are verified server-side through FastAPI dependencies.
+- Supabase queries are encapsulated in repositories and use parameterization.
+- Pydantic request and response schemas are strictly defined.
+- Applicable unit and integration tests pass.
+- Assumptions, units, and provenance labels are transparently presented to the user.
+- No secrets, credentials, or uncalibrated synthetic data are exposed.
