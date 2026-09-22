@@ -510,7 +510,7 @@ No supplementary metadata columns may be added to reference CSV files, as this w
 | `fuel_prices.csv` | 2 fuel types (VLSFO active, MGO reference-only) × 731 dates | **1,462** | VLSFO: active voyage cost; MGO: reference-only |
 | `port_activity.csv` | 15 ports × 731 observation dates | **10,965** | Congestion, arrivals, and waiting time series |
 | `scenario_defaults.csv` | Baseline, Adverse, Favorable stress presets | **3** | Predefined sensitivity & stress parameters |
-| **Total Reference Records** | Across all 9 canonical reference datasets | **259,561** | Frozen V1 Synthetic Universe |
+| **Total Reference Records** | Across all 9 canonical reference datasets | **259,589** | Frozen V1 Synthetic Universe |
 
 ---
 
