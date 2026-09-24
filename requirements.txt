@@ -1,2 +1,7 @@
 psycopg2-binary==2.9.12
 python-dotenv
+pytest
+pytest-asyncio
+httpx
+fastapi
+pydantic
