@@ -2,7 +2,7 @@
 DockTech V1 — Cost Domain Package
 ==================================
 Exports pure domain models, value objects, domain exceptions,
-formulas, and calculation engine for the DockTech V1 Cost Engine.
+formulas, cost input resolver, and calculation engine for the DockTech V1 Cost Engine.
 """
 
 from .engine import calculate_cost
@@ -39,11 +39,13 @@ from .models import (
     CostResult,
     FreightUnit,
 )
+from .resolver import CostInputResolver
 
 __all__ = [
     "CostInputs",
     "CostResult",
     "FreightUnit",
+    "CostInputResolver",
     "calculate_cost",
     "calculate_required_voyages",
     "calculate_sailing_days",
