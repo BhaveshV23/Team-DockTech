@@ -11,7 +11,7 @@ Freight Forecasting + ML + Model Evaluation.
 - Per-series model selection using the lower held-out MAE; the seasonal-naive baseline wins ties. The selected candidate is the one served for that series.
 - MAE, RMSE, MAPE, and directional accuracy.
 - 7/30/90-day recursive forecasts.
-- Central/lower/upper forecast values using selected-model validation residual variability, scaled by the square root of the forecast day. If residual metadata is unavailable, historical daily-change variability is used; no fixed percentage band is applied.
+- Central/lower/upper forecast values from scenario bounds using the canonical `scenario_defaults.csv` freight adjustments: `BASELINE` is central, `FAVORABLE` is the lower side, and `ADVERSE` is the upper side. No confidence score or new scenario shock is introduced.
 - Versioned model artifact and reproducibility metadata.
 - Metadata records model configuration and Python/ML-library versions used to train the artifact.
 - Backend-facing `ForecastService.forecast(...)` interface.

@@ -100,7 +100,7 @@ def main():
         "data_type": sorted(df.data_type.unique().tolist()),
         "source": sorted(df.source.unique().tolist()),
         "feature_definition": "lags 1,2,3,7,14,28; rolling mean/std 7,14,28; calendar features",
-        "uncertainty": "Approximate 95% uncertainty bounds from selected-model held-out residual standard deviation, scaled by square root of forecast days; not a statistical confidence statement",
+        "uncertainty": "Scenario bounds from canonical scenario_defaults.csv freight_change_pct: BASELINE for central, FAVORABLE for lower, ADVERSE for upper; not a statistical confidence statement",
         "residual_std_by_series": residual_map,
         "trained_series_count": len(model.models),
     }

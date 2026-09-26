@@ -38,7 +38,7 @@ Metrics:
 The current aggregate results are stored in `models/metadata/evaluation_metrics.csv` and were produced from the supplied synthetic dataset. They are not commercial performance claims.
 
 ## Uncertainty
-The service returns central/lower/upper values using the selected model's route/vessel/unit held-out residual standard deviation, scaled by the square root of the forecast day. If that residual value is unavailable, historical daily-change variability is used. Bounds are floored at zero for non-negative freight rates. These are approximate uncertainty bounds, not statistical confidence statements; no fixed percentage band is used.
+The service produces scenario bounds from the frozen `data/reference/scenario_defaults.csv` freight adjustments. `BASELINE` (0% freight change) maps to the central forecast, `FAVORABLE` (the existing negative freight adjustment) maps to the lower forecast, and `ADVERSE` (the existing positive freight adjustment) maps to the upper forecast. The service reads these values from the canonical defaults; it does not introduce new shocks or invoke Scenario/Risk cost logic. The bounds are scenario uncertainty, not statistical confidence, and are floored at zero for non-negative freight rates.
 
 ## Forecast point contract
 Each point includes `forecast_date`, `central`, `lower`, `upper`, `freight_unit`, `model_version`, and `training_data_end_date`. The serialized `date` key remains as a backward-compatible alias for `forecast_date`.

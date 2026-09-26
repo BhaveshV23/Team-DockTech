@@ -33,7 +33,7 @@ def service_files(tmp_path):
     metadata = {
         "model_version": model.version,
         "training_period": {"end": "2024-04-09"},
-        "residual_std_by_series": {"R||V||USD_PER_MT": 0.5},
+        "residual_std_by_series": {"R||V||USD_PER_MT": 5000.0},
     }
     save_model(model, str(artifact_path), str(metadata_path), metadata)
     return data_path, artifact_path, metadata_path, metadata
@@ -69,6 +69,30 @@ def test_forecast_output_contract_and_uncertainty_bounds(service_files):
     assert point["model_version"] == "docktech-ridge-ar-v1"
     assert point["training_data_end_date"] == "2024-04-09"
     assert point["lower"] <= point["central"] <= point["upper"]
+    assert "confidence" not in point
+
+
+@pytest.mark.parametrize("horizon", [7, 30, 90])
+def test_bounds_use_canonical_scenario_freight_shocks(service_files, horizon):
+    data_path, artifact_path, metadata_path, _ = service_files
+    service = ForecastService(str(data_path), str(artifact_path), str(metadata_path))
+    defaults = pd.read_csv("data/reference/scenario_defaults.csv").set_index("scenario_id")
+
+    result = service.forecast("R", "V", "USD_PER_MT", horizon)
+
+    baseline = defaults.loc["BASELINE", "freight_change_pct"]
+    favorable = defaults.loc["FAVORABLE", "freight_change_pct"]
+    adverse = defaults.loc["ADVERSE", "freight_change_pct"]
+    assert baseline == 0
+    assert favorable < 0 < adverse
+    assert len(result.points) == horizon
+    for point in result.points:
+        assert point.central > 0
+        assert point.central == pytest.approx(point.central * (1 + baseline / 100))
+        assert point.lower == pytest.approx(max(0, point.central * (1 + favorable / 100)))
+        assert point.upper == pytest.approx(max(0, point.central * (1 + adverse / 100)))
+        assert point.lower <= point.central <= point.upper
+        assert not hasattr(point, "confidence")
 
 
 @pytest.mark.parametrize("horizon", [0, 1, 14, 91, -7])

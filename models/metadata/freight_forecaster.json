@@ -2126,7 +2126,7 @@
     "SYNTHETIC_GENERATOR_V1"
   ],
   "feature_definition": "lags 1,2,3,7,14,28; rolling mean/std 7,14,28; calendar features",
-  "uncertainty": "Approximate 95% uncertainty bounds from selected-model held-out residual standard deviation, scaled by square root of forecast days; not a statistical confidence statement",
+  "uncertainty": "Scenario bounds from canonical scenario_defaults.csv freight_change_pct: BASELINE for central, FAVORABLE for lower, ADVERSE for upper; not a statistical confidence statement",
   "residual_std_by_series": {
     "BALTIMORE_PARADIP_COKING||CAPESIZE||USD_PER_DAY": 548.9491115531498,
     "BALTIMORE_PARADIP_COKING||CAPESIZE||USD_PER_MT": 0.33146238562249997,
