@@ -1,66 +1,65 @@
-import csv
-import os
-from typing import Set
-import httpx
-from app.core.config import settings
+"""DockTech V1 — Port Repository
+Loads and queries canonical port data from data/reference/ports.csv.
+Sources: DATA_DICTIONARY.md, ARCHITECTURE.md
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Dict, List, Optional
+
+from backend.app.domain.entities import Port
+from backend.app.repositories.base import _find_data_reference_dir, load_csv_as_dicts
 
 
 class PortRepository:
-    """Repository for validating port IDs against CSV reference data or Supabase storage."""
+    """
+    Repository for canonical Port reference data.
+    Reads from data/reference/ports.csv — the single source of truth.
+    """
 
-    def __init__(self):
-        self.supabase_url = settings.SUPABASE_URL
-        self.service_role_key = settings.SUPABASE_SERVICE_ROLE_KEY
-        self._cached_ports: Set[str] = set()
-        self._load_ports_from_csv()
+    def __init__(self, data_dir: Optional[Path] = None) -> None:
+        self._data_dir = data_dir or _find_data_reference_dir()
+        self._ports: Optional[Dict[str, Port]] = None
 
-    def _load_ports_from_csv(self) -> None:
-        """Load static reference ports from data/reference/ports.csv."""
-        csv_path = os.path.abspath(
-            os.path.join(
-                os.path.dirname(__file__), "..", "..", "..", "data", "reference", "ports.csv"
+    def _load(self) -> Dict[str, Port]:
+        if self._ports is not None:
+            return self._ports
+
+        rows = load_csv_as_dicts(self._data_dir / "ports.csv")
+        self._ports = {}
+
+        for row in rows:
+            port_id = row["port_id"].strip()
+            self._ports[port_id] = Port(
+                port_id=port_id,
+                port_name=row["port_name"].strip(),
+                country=row["country"].strip(),
+                max_loa_m=float(row["max_loa_m"]),
+                max_beam_m=float(row["max_beam_m"]),
+                max_draft_m=float(row["max_draft_m"]),
+                handling_rate_tpd=float(row["handling_rate_tpd"]),
+                typical_turnaround_hours=float(row["typical_turnaround_hours"]),
+                source=row["source"].strip(),
+                data_type=row["data_type"].strip(),
             )
-        )
-        if os.path.exists(csv_path):
-            try:
-                with open(csv_path, mode="r", encoding="utf-8") as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        port_id = row.get("port_id")
-                        if port_id:
-                            self._cached_ports.add(port_id.strip().upper())
-            except Exception:
-                pass
+
+        return self._ports
+
+    def get_by_id(self, port_id: str) -> Optional[Port]:
+        """Returns a Port by port_id, or None if not found."""
+        return self._load().get(port_id)
+
+    def get_all(self) -> List[Port]:
+        """Returns all canonical ports."""
+        return list(self._load().values())
+
+    def exists(self, port_id: str) -> bool:
+        """Returns True if the port_id is in the canonical dataset."""
+        return port_id in self._load()
 
     def is_valid_port(self, port_id: str) -> bool:
+        """Compatibility method for the existing cargo service."""
         if not port_id or not port_id.strip():
             return False
-
-        normalized = port_id.strip().upper()
-
-        # 1. Check local reference cache
-        if normalized in self._cached_ports:
-            return True
-
-        # 2. Query Supabase REST API if configured
-        if self.supabase_url and self.service_role_key:
-            url = f"{self.supabase_url.rstrip('/')}/rest/v1/ports"
-            headers = {
-                "apikey": self.service_role_key,
-                "Authorization": f"Bearer {self.service_role_key}",
-                "Accept": "application/json",
-            }
-            params = {"port_id": f"eq.{normalized}", "select": "port_id"}
-            try:
-                with httpx.Client(timeout=5.0) as client:
-                    resp = client.get(url, headers=headers, params=params)
-                    if resp.status_code == 200 and resp.json():
-                        self._cached_ports.add(normalized)
-                        return True
-            except Exception:
-                pass
-
-        return False
-
-
-port_repository = PortRepository()
+        return self.exists(port_id.strip())

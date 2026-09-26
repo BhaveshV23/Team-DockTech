@@ -1,95 +1,627 @@
+"""
+DockTech V1 — Reference Data Repository
+
+Provides strongly typed data access abstractions and CSV-backed
+implementations for canonical maritime reference data.
+
+The canonical CSV datasets under data/reference/ remain the
+single source of truth.
+"""
+
+from __future__ import annotations
+
 import csv
-import os
-from typing import Any, Dict, List
-import httpx
-from app.core.config import settings
+import datetime
+from dataclasses import dataclass
+from decimal import Decimal
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Protocol
+
+from backend.app.domain.cost.errors import (
+    InsufficientFeasibilityDataError,
+    InsufficientFreightDataError,
+    InsufficientFuelPriceDataError,
+    InsufficientPortActivityDataError,
+    RouteNotFoundError,
+    VesselClassNotFoundError,
+)
+from backend.app.domain.cost.models import FreightUnit
+from backend.app.repositories.base import (
+    _find_data_reference_dir,
+    load_csv_as_dicts,
+)
 
 
-class ReferenceRepository:
-    """Repository for querying canonical reference datasets (ports, vessel_classes, routes).
+# ============================================================================
+# 1. REFERENCE RECORD DATA STRUCTURES
+# ============================================================================
 
-    Uses Supabase PostgreSQL REST API as authoritative production source with local CSV fallback.
+
+@dataclass(frozen=True)
+class PortRecord:
+    port_id: str
+    port_name: str
+    country: str
+    max_loa_m: Decimal
+    max_beam_m: Decimal
+    max_draft_m: Decimal
+    handling_rate_tpd: Decimal
+    typical_turnaround_hours: Decimal
+    source: str
+    data_type: str
+
+
+@dataclass(frozen=True)
+class BerthRecord:
+    berth_id: str
+    port_id: str
+    berth_name: str
+    commodity: str
+    max_loa_m: Decimal
+    max_beam_m: Decimal
+    max_draft_m: Decimal
+    handling_rate_tpd: Decimal
+    source: str
+    data_type: str
+
+
+@dataclass(frozen=True)
+class VesselClassRecord:
+    vessel_class_id: str
+    vessel_class_name: str
+    dwt_min_mt: Decimal
+    dwt_max_mt: Decimal
+    loa_m: Decimal
+    beam_m: Decimal
+    draft_m: Decimal
+    speed_knots: Decimal
+    cargo_capacity_mt: Decimal
+    fuel_consumption_mt_day: Decimal
+    source: str
+    data_type: str
+
+
+@dataclass(frozen=True)
+class RouteRecord:
+    route_id: str
+    origin_port_id: str
+    destination_port_id: str
+    commodity: str
+    distance_nm: Decimal
+    typical_sailing_days: Decimal
+    source: str
+    data_type: str
+
+
+@dataclass(frozen=True)
+class FreightRateRecord:
+    freight_rate_id: str
+    observation_date: datetime.date
+    route_id: str
+    vessel_class_id: str
+    freight_value: Decimal
+    freight_unit: FreightUnit
+    currency: str
+    data_type: str
+    source: str
+
+
+@dataclass(frozen=True)
+class FuelPriceRecord:
+    fuel_price_id: str
+    observation_date: datetime.date
+    fuel_type: str
+    price_value: Decimal
+    currency: str
+    unit: str
+    data_type: str
+    source: str
+
+
+@dataclass(frozen=True)
+class PortActivityRecord:
+    activity_id: str
+    observation_date: datetime.date
+    port_id: str
+    vessel_arrivals: int
+    average_waiting_hours: Decimal
+    average_turnaround_hours: Decimal
+    congestion_level: str
+    source: str
+    data_type: str
+
+
+# ============================================================================
+# 2. REPOSITORY PROTOCOL
+# ============================================================================
+
+
+class ReferenceRepositoryProtocol(Protocol):
+    """Abstract interface for querying DockTech canonical reference datasets."""
+
+    def get_route(
+        self,
+        origin_port_id: str,
+        destination_port_id: str,
+        commodity: str,
+    ) -> RouteRecord:
+        ...
+
+    def get_vessel_class(self, vessel_class_id: str) -> VesselClassRecord:
+        ...
+
+    def get_compatible_berth_handling_rate(
+        self,
+        port_id: str,
+        commodity: str,
+        vessel_class: VesselClassRecord,
+    ) -> Decimal:
+        ...
+
+    def get_latest_vlsfo_price(
+        self,
+        cost_reference_date: datetime.date,
+    ) -> Decimal:
+        ...
+
+    def get_latest_port_waiting_hours(
+        self,
+        port_id: str,
+        cost_reference_date: datetime.date,
+    ) -> Decimal:
+        ...
+
+    def get_latest_freight_rate(
+        self,
+        route_id: str,
+        vessel_class_id: str,
+        freight_unit: FreightUnit,
+        cost_reference_date: datetime.date,
+    ) -> Decimal:
+        ...
+
+
+# ============================================================================
+# 3. CSV REFERENCE DATA REPOSITORY
+# ============================================================================
+
+
+class CSVReferenceRepository:
+    """
+    In-memory indexed reference repository loaded from canonical CSV datasets.
+
+    Provides deterministic, reproducible data access without network
+    dependency for the cost engine.
     """
 
-    def __init__(self):
-        self.supabase_url = settings.SUPABASE_URL
-        self.service_role_key = settings.SUPABASE_SERVICE_ROLE_KEY
-        self.base_csv_dir = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "reference")
-        )
+    def __init__(self, data_dir: Path | str) -> None:
+        self.data_dir = Path(data_dir)
 
-    def _read_csv(self, filename: str) -> List[Dict[str, Any]]:
-        csv_path = os.path.join(self.base_csv_dir, filename)
-        results = []
-        if os.path.exists(csv_path):
-            with open(csv_path, mode="r", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    cleaned = {}
-                    for k, v in row.items():
-                        if v is None:
-                            cleaned[k] = ""
-                        else:
-                            try:
-                                cleaned[k] = float(v)
-                            except ValueError:
-                                cleaned[k] = v
-                    results.append(cleaned)
-        return results
+        self._ports: Dict[str, PortRecord] = {}
+        self._routes: Dict[tuple[str, str, str], RouteRecord] = {}
+        self._vessel_classes: Dict[str, VesselClassRecord] = {}
+        self._berths_by_port_comm: Dict[
+            tuple[str, str], List[BerthRecord]
+        ] = {}
+        self._vlsfo_prices: List[FuelPriceRecord] = []
+        self._port_activities: Dict[str, List[PortActivityRecord]] = {}
+        self._freight_rates: Dict[
+            tuple[str, str, str], List[FreightRateRecord]
+        ] = {}
+
+        self._load_all()
+
+    def _load_all(self) -> None:
+        self._load_ports()
+        self._load_routes()
+        self._load_vessel_classes()
+        self._load_berths()
+        self._load_fuel_prices()
+        self._load_port_activity()
+        self._load_freight_rates()
+
+    def _load_ports(self) -> None:
+        path = self.data_dir / "ports.csv"
+
+        for row in load_csv_as_dicts(path):
+            record = PortRecord(
+                port_id=row["port_id"].strip(),
+                port_name=row["port_name"].strip(),
+                country=row["country"].strip(),
+                max_loa_m=Decimal(row["max_loa_m"]),
+                max_beam_m=Decimal(row["max_beam_m"]),
+                max_draft_m=Decimal(row["max_draft_m"]),
+                handling_rate_tpd=Decimal(row["handling_rate_tpd"]),
+                typical_turnaround_hours=Decimal(
+                    row["typical_turnaround_hours"]
+                ),
+                source=row["source"].strip(),
+                data_type=row["data_type"].strip(),
+            )
+            self._ports[record.port_id] = record
+
+    def _load_routes(self) -> None:
+        path = self.data_dir / "routes.csv"
+
+        for row in load_csv_as_dicts(path):
+            record = RouteRecord(
+                route_id=row["route_id"].strip(),
+                origin_port_id=row["origin_port_id"].strip(),
+                destination_port_id=row["destination_port_id"].strip(),
+                commodity=row["commodity"].strip(),
+                distance_nm=Decimal(row["distance_nm"]),
+                typical_sailing_days=Decimal(row["typical_sailing_days"]),
+                source=row["source"].strip(),
+                data_type=row["data_type"].strip(),
+            )
+
+            self._routes[
+                (
+                    record.origin_port_id,
+                    record.destination_port_id,
+                    record.commodity,
+                )
+            ] = record
+
+    def _load_vessel_classes(self) -> None:
+        path = self.data_dir / "vessel_classes.csv"
+
+        for row in load_csv_as_dicts(path):
+            record = VesselClassRecord(
+                vessel_class_id=row["vessel_class_id"].strip(),
+                vessel_class_name=row["vessel_class_name"].strip(),
+                dwt_min_mt=Decimal(row["dwt_min_mt"]),
+                dwt_max_mt=Decimal(row["dwt_max_mt"]),
+                loa_m=Decimal(row["loa_m"]),
+                beam_m=Decimal(row["beam_m"]),
+                draft_m=Decimal(row["draft_m"]),
+                speed_knots=Decimal(row["speed_knots"]),
+                cargo_capacity_mt=Decimal(row["cargo_capacity_mt"]),
+                fuel_consumption_mt_day=Decimal(
+                    row["fuel_consumption_mt_day"]
+                ),
+                source=row["source"].strip(),
+                data_type=row["data_type"].strip(),
+            )
+
+            self._vessel_classes[record.vessel_class_id] = record
+
+    def _load_berths(self) -> None:
+        path = self.data_dir / "berths.csv"
+
+        for row in load_csv_as_dicts(path):
+            record = BerthRecord(
+                berth_id=row["berth_id"].strip(),
+                port_id=row["port_id"].strip(),
+                berth_name=row["berth_name"].strip(),
+                commodity=row["commodity"].strip(),
+                max_loa_m=Decimal(row["max_loa_m"]),
+                max_beam_m=Decimal(row["max_beam_m"]),
+                max_draft_m=Decimal(row["max_draft_m"]),
+                handling_rate_tpd=Decimal(row["handling_rate_tpd"]),
+                source=row["source"].strip(),
+                data_type=row["data_type"].strip(),
+            )
+
+            key = (record.port_id, record.commodity)
+
+            if key not in self._berths_by_port_comm:
+                self._berths_by_port_comm[key] = []
+
+            self._berths_by_port_comm[key].append(record)
+
+    def _load_fuel_prices(self) -> None:
+        path = self.data_dir / "fuel_prices.csv"
+
+        for row in load_csv_as_dicts(path):
+            fuel_type = row["fuel_type"].strip()
+
+            if fuel_type == "VLSFO":
+                record = FuelPriceRecord(
+                    fuel_price_id=row["fuel_price_id"].strip(),
+                    observation_date=datetime.date.fromisoformat(
+                        row["observation_date"].strip()
+                    ),
+                    fuel_type=fuel_type,
+                    price_value=Decimal(row["price_value"]),
+                    currency=row["currency"].strip(),
+                    unit=row["unit"].strip(),
+                    data_type=row["data_type"].strip(),
+                    source=row["source"].strip(),
+                )
+
+                self._vlsfo_prices.append(record)
+
+        self._vlsfo_prices.sort(key=lambda r: r.observation_date)
+
+    def _load_port_activity(self) -> None:
+        path = self.data_dir / "port_activity.csv"
+
+        for row in load_csv_as_dicts(path):
+            port_id = row["port_id"].strip()
+
+            record = PortActivityRecord(
+                activity_id=row["activity_id"].strip(),
+                observation_date=datetime.date.fromisoformat(
+                    row["observation_date"].strip()
+                ),
+                port_id=port_id,
+                vessel_arrivals=int(row["vessel_arrivals"]),
+                average_waiting_hours=Decimal(
+                    row["average_waiting_hours"]
+                ),
+                average_turnaround_hours=Decimal(
+                    row["average_turnaround_hours"]
+                ),
+                congestion_level=row["congestion_level"].strip(),
+                source=row["source"].strip(),
+                data_type=row["data_type"].strip(),
+            )
+
+            if port_id not in self._port_activities:
+                self._port_activities[port_id] = []
+
+            self._port_activities[port_id].append(record)
+
+        for records in self._port_activities.values():
+            records.sort(key=lambda r: r.observation_date)
+
+    def _load_freight_rates(self) -> None:
+        path = self.data_dir / "freight_rates.csv"
+
+        for row in load_csv_as_dicts(path):
+            route_id = row["route_id"].strip()
+            vessel_class_id = row["vessel_class_id"].strip()
+            freight_unit = FreightUnit.from_str(
+                row["freight_unit"].strip()
+            )
+
+            record = FreightRateRecord(
+                freight_rate_id=row["freight_rate_id"].strip(),
+                observation_date=datetime.date.fromisoformat(
+                    row["observation_date"].strip()
+                ),
+                route_id=route_id,
+                vessel_class_id=vessel_class_id,
+                freight_value=Decimal(row["freight_value"]),
+                freight_unit=freight_unit,
+                currency=row["currency"].strip(),
+                data_type=row["data_type"].strip(),
+                source=row["source"].strip(),
+            )
+
+            key = (
+                route_id,
+                vessel_class_id,
+                freight_unit.value,
+            )
+
+            if key not in self._freight_rates:
+                self._freight_rates[key] = []
+
+            self._freight_rates[key].append(record)
+
+        for records in self._freight_rates.values():
+            records.sort(key=lambda r: r.observation_date)
+
+    # ========================================================================
+    # Compatibility methods for the existing reference API
+    # ========================================================================
 
     def get_ports(self) -> List[Dict[str, Any]]:
-        if self.supabase_url and self.service_role_key:
-            url = f"{self.supabase_url.rstrip('/')}/rest/v1/ports"
-            headers = {
-                "apikey": self.service_role_key,
-                "Authorization": f"Bearer {self.service_role_key}",
-                "Accept": "application/json",
+        """Return canonical ports in the format expected by the reference API."""
+        return [
+            {
+                "port_id": record.port_id,
+                "port_name": record.port_name,
+                "country": record.country,
+                "max_loa_m": float(record.max_loa_m),
+                "max_beam_m": float(record.max_beam_m),
+                "max_draft_m": float(record.max_draft_m),
+                "handling_rate_tpd": float(record.handling_rate_tpd),
+                "typical_turnaround_hours": float(
+                    record.typical_turnaround_hours
+                ),
+                "source": record.source,
+                "data_type": record.data_type,
             }
-            try:
-                with httpx.Client(timeout=3.0) as client:
-                    resp = client.get(url, headers=headers)
-                    if resp.status_code == 200:
-                        return resp.json()
-            except Exception:
-                pass  # Fall back to CSV reference dataset if database is unreachable
-
-        return self._read_csv("ports.csv")
+            for record in self._ports.values()
+        ]
 
     def get_vessels(self) -> List[Dict[str, Any]]:
-        if self.supabase_url and self.service_role_key:
-            url = f"{self.supabase_url.rstrip('/')}/rest/v1/vessel_classes"
-            headers = {
-                "apikey": self.service_role_key,
-                "Authorization": f"Bearer {self.service_role_key}",
-                "Accept": "application/json",
+        """Return canonical vessel classes for the existing reference API."""
+        return [
+            {
+                "vessel_class_id": record.vessel_class_id,
+                "vessel_class_name": record.vessel_class_name,
+                "dwt_min_mt": float(record.dwt_min_mt),
+                "dwt_max_mt": float(record.dwt_max_mt),
+                "loa_m": float(record.loa_m),
+                "beam_m": float(record.beam_m),
+                "draft_m": float(record.draft_m),
+                "speed_knots": float(record.speed_knots),
+                "cargo_capacity_mt": float(record.cargo_capacity_mt),
+                "fuel_consumption_mt_day": float(
+                    record.fuel_consumption_mt_day
+                ),
+                "source": record.source,
+                "data_type": record.data_type,
             }
-            try:
-                with httpx.Client(timeout=3.0) as client:
-                    resp = client.get(url, headers=headers)
-                    if resp.status_code == 200:
-                        return resp.json()
-            except Exception:
-                pass  # Fall back to CSV reference dataset if database is unreachable
-
-        return self._read_csv("vessel_classes.csv")
+            for record in self._vessel_classes.values()
+        ]
 
     def get_routes(self) -> List[Dict[str, Any]]:
-        if self.supabase_url and self.service_role_key:
-            url = f"{self.supabase_url.rstrip('/')}/rest/v1/routes"
-            headers = {
-                "apikey": self.service_role_key,
-                "Authorization": f"Bearer {self.service_role_key}",
-                "Accept": "application/json",
+        """Return canonical routes for the existing reference API."""
+        return [
+            {
+                "route_id": record.route_id,
+                "origin_port_id": record.origin_port_id,
+                "destination_port_id": record.destination_port_id,
+                "commodity": record.commodity,
+                "distance_nm": float(record.distance_nm),
+                "typical_sailing_days": float(
+                    record.typical_sailing_days
+                ),
+                "source": record.source,
+                "data_type": record.data_type,
             }
-            try:
-                with httpx.Client(timeout=3.0) as client:
-                    resp = client.get(url, headers=headers)
-                    if resp.status_code == 200:
-                        return resp.json()
-            except Exception:
-                pass  # Fall back to CSV reference dataset if database is unreachable
+            for record in self._routes.values()
+        ]
 
-        return self._read_csv("routes.csv")
+    # ========================================================================
+    # Protocol method implementations
+    # ========================================================================
+
+    def get_route(
+        self,
+        origin_port_id: str,
+        destination_port_id: str,
+        commodity: str,
+    ) -> RouteRecord:
+        key = (
+            origin_port_id.strip(),
+            destination_port_id.strip(),
+            commodity.strip(),
+        )
+
+        if key not in self._routes:
+            raise RouteNotFoundError(
+                f"No canonical route found connecting "
+                f"{origin_port_id} -> {destination_port_id} "
+                f"for commodity '{commodity}'."
+            )
+
+        return self._routes[key]
+
+    def get_vessel_class(
+        self,
+        vessel_class_id: str,
+    ) -> VesselClassRecord:
+        vid = vessel_class_id.strip().upper()
+
+        if vid not in self._vessel_classes:
+            raise VesselClassNotFoundError(
+                f"Vessel class '{vessel_class_id}' does not exist "
+                f"in canonical vessel catalog."
+            )
+
+        return self._vessel_classes[vid]
+
+    def get_compatible_berth_handling_rate(
+        self,
+        port_id: str,
+        commodity: str,
+        vessel_class: VesselClassRecord,
+    ) -> Decimal:
+        """
+        Retrieve the handling rate from a physically compatible berth
+        dedicated to the commodity.
+        """
+
+        key = (port_id.strip(), commodity.strip())
+        berths = self._berths_by_port_comm.get(key, [])
+
+        if not berths:
+            raise InsufficientFeasibilityDataError(
+                f"Port '{port_id}' has no configured berths "
+                f"for commodity '{commodity}'."
+            )
+
+        compatible_berths = [
+            berth
+            for berth in berths
+            if berth.max_loa_m >= vessel_class.loa_m
+            and berth.max_beam_m >= vessel_class.beam_m
+            and berth.max_draft_m >= vessel_class.draft_m
+        ]
+
+        if not compatible_berths:
+            raise InsufficientFeasibilityDataError(
+                f"Port '{port_id}' has no compatible berth for "
+                f"vessel class '{vessel_class.vessel_class_id}' "
+                f"handling commodity '{commodity}'."
+            )
+
+        return max(
+            berth.handling_rate_tpd
+            for berth in compatible_berths
+        )
+
+    def get_latest_vlsfo_price(
+        self,
+        cost_reference_date: datetime.date,
+    ) -> Decimal:
+        valid = [
+            record
+            for record in self._vlsfo_prices
+            if record.observation_date <= cost_reference_date
+        ]
+
+        if not valid:
+            raise InsufficientFuelPriceDataError(
+                f"No valid VLSFO price record found on or before "
+                f"{cost_reference_date}."
+            )
+
+        return valid[-1].price_value
+
+    def get_latest_port_waiting_hours(
+        self,
+        port_id: str,
+        cost_reference_date: datetime.date,
+    ) -> Decimal:
+        records = self._port_activities.get(port_id.strip(), [])
+
+        valid = [
+            record
+            for record in records
+            if record.observation_date <= cost_reference_date
+        ]
+
+        if not valid:
+            raise InsufficientPortActivityDataError(
+                f"No valid port activity record found for port "
+                f"'{port_id}' on or before {cost_reference_date}."
+            )
+
+        return valid[-1].average_waiting_hours
+
+    def get_latest_freight_rate(
+        self,
+        route_id: str,
+        vessel_class_id: str,
+        freight_unit: FreightUnit,
+        cost_reference_date: datetime.date,
+    ) -> Decimal:
+        key = (
+            route_id.strip(),
+            vessel_class_id.strip().upper(),
+            freight_unit.value,
+        )
+
+        records = self._freight_rates.get(key, [])
+
+        valid = [
+            record
+            for record in records
+            if record.observation_date <= cost_reference_date
+        ]
+
+        if not valid:
+            raise InsufficientFreightDataError(
+                f"No historical freight rate found for route "
+                f"'{route_id}', vessel '{vessel_class_id}', "
+                f"unit '{freight_unit.value}' on or before "
+                f"{cost_reference_date}."
+            )
+
+        return valid[-1].freight_value
 
 
-reference_repository = ReferenceRepository()
+# ============================================================================
+# Existing reference-service compatibility instance
+# ============================================================================
+
+reference_repository = CSVReferenceRepository(
+    data_dir=_find_data_reference_dir()
+)

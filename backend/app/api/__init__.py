@@ -1,3 +1,1 @@
-"""
-API package initialization
-"""
+"""DockTech V1 API package."""

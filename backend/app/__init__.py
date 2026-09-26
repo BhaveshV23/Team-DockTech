@@ -1,3 +1,1 @@
-"""
-DockTech Backend Application Package
-"""
+"""DockTech V1 backend application package."""
