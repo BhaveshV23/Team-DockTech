@@ -30,7 +30,6 @@ from backend.app.domain.scenario import (
     ScenarioEngine,
     ScenarioParameterShock,
 )
-from backend.app.domain.voyage_cost import VoyageCostEngine
 
 __all__ = [
     "Commodity",
@@ -57,5 +56,15 @@ __all__ = [
     "ScenarioComparison",
     "ScenarioEngine",
     "ScenarioParameterShock",
-    "VoyageCostEngine",
+    "CANONICAL_COMMODITIES",
+    "CANONICAL_VESSEL_CLASSES",
+    "FeasibilityStatus",
+    "RejectionReasonCode",
 ]
+
+from backend.app.domain.constants import (
+    CANONICAL_COMMODITIES,
+    CANONICAL_VESSEL_CLASSES,
+    FeasibilityStatus,
+    RejectionReasonCode,
+)

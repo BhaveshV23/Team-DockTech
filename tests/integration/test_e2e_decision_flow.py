@@ -27,7 +27,6 @@ from backend.app.domain.entities import (
     ScenarioDefault,
     VesselClass,
 )
-from backend.app.domain.voyage_cost import VoyageCostEngine
 from backend.app.services.scenario_service import ScenarioService
 
 

@@ -30,6 +30,8 @@ class Port:
     max_draft_m: float
     handling_rate_tpd: float
     typical_turnaround_hours: float
+    source: str = "SYNTHETIC_GENERATOR_V1"
+    data_type: str = "SYNTHETIC"
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,8 @@ class Berth:
     max_beam_m: float
     max_draft_m: float
     handling_rate_tpd: float
+    source: str = "SYNTHETIC_GENERATOR_V1"
+    data_type: str = "SYNTHETIC"
 
 
 @dataclass(frozen=True)
@@ -56,6 +60,8 @@ class VesselClass:
     speed_knots: float
     cargo_capacity_mt: float
     fuel_consumption_mt_day: float
+    source: str = "SYNTHETIC_GENERATOR_V1"
+    data_type: str = "SYNTHETIC"
 
 
 @dataclass(frozen=True)
@@ -66,6 +72,8 @@ class Route:
     commodity: Commodity
     distance_nm: float
     typical_sailing_days: float
+    source: str = "SYNTHETIC_GENERATOR_V1"
+    data_type: str = "SYNTHETIC"
 
 
 @dataclass(frozen=True)

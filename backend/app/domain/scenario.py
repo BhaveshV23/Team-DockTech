@@ -4,17 +4,42 @@ Applies parameter shocks to baseline decision inputs and generates structured co
 """
 
 from dataclasses import dataclass
+from decimal import Decimal
 from uuid import uuid4
 
 from backend.app.domain.constants import CongestionLevel, RiskLevel, ScenarioType
+from backend.app.domain.cost import CostInputs, CostResult, FreightUnit, calculate_cost
 from backend.app.domain.entities import (
     DecisionInputs,
-    ScenarioDefault,
     ScenarioResult,
-    ScenarioResultSet,
+    VoyageCostBreakdown,
 )
 from backend.app.domain.risk import RiskEvaluator
-from backend.app.domain.voyage_cost import VoyageCostEngine
+
+
+def _to_cost_breakdown(cost_result: CostResult) -> VoyageCostBreakdown:
+    """Convert canonical CostResult into the historical VoyageCostBreakdown shape used by Scenario/Risk consumers."""
+    turnaround_per_voyage = (
+        cost_result.estimated_turnaround_hours / cost_result.required_voyages
+        if cost_result.required_voyages
+        else Decimal("0")
+    )
+    return VoyageCostBreakdown(
+        sailing_days=float(cost_result.sailing_days_per_voyage),
+        required_voyages=cost_result.required_voyages,
+        origin_handling_hours_total=float(cost_result.origin_handling_hours_total),
+        destination_handling_hours_total=float(cost_result.dest_handling_hours_total),
+        waiting_hours_total=float(cost_result.waiting_hours_total),
+        scenario_delay_total=float(cost_result.scenario_delay_hours_total),
+        estimated_turnaround_hours=float(cost_result.estimated_turnaround_hours),
+        turnaround_hours_per_voyage=float(turnaround_per_voyage),
+        port_days_per_voyage=float(cost_result.port_days_per_voyage),
+        vessel_days_per_voyage=float(cost_result.vessel_days_per_voyage),
+        total_fuel_cost_usd=float(round(cost_result.total_fuel_cost_usd, 2)),
+        expected_freight_cost=float(round(cost_result.expected_freight_cost, 2)),
+        expected_total_cost=float(round(cost_result.expected_total_cost, 2)),
+        effective_cost_per_mt=float(cost_result.effective_cost_per_mt),
+    )
 
 
 @dataclass(frozen=True)
@@ -60,19 +85,25 @@ class ScenarioEngine:
         shocked_freight_rate = max(0.01, base_inputs.base_freight_rate * multiplier_freight)
         shocked_vlsfo_price = max(0.01, base_inputs.base_vlsfo_price_usd_mt * multiplier_fuel)
 
-        cost_breakdown = VoyageCostEngine.calculate_voyage_cost(
-            cargo_volume_mt=base_inputs.cargo_request.cargo_volume_mt,
-            vessel_class=base_inputs.vessel_class,
-            origin_berth=base_inputs.origin_berth,
-            destination_berth=base_inputs.destination_berth,
-            route=base_inputs.route,
-            freight_rate=shocked_freight_rate,
-            freight_unit=base_inputs.freight_unit,
-            vlsfo_price_usd_mt=shocked_vlsfo_price,
-            origin_waiting_hours=base_inputs.origin_waiting_hours,
-            destination_waiting_hours=base_inputs.destination_waiting_hours,
-            scenario_delay_hours=shock.delay_hours,
+        freight_unit = FreightUnit(base_inputs.freight_unit.value)
+
+        canonical_inputs = CostInputs(
+            cargo_volume_mt=Decimal(str(base_inputs.cargo_request.cargo_volume_mt)),
+            distance_nm=Decimal(str(base_inputs.route.distance_nm)),
+            vessel_cargo_capacity_mt=Decimal(str(base_inputs.vessel_class.cargo_capacity_mt)),
+            vessel_speed_knots=Decimal(str(base_inputs.vessel_class.speed_knots)),
+            vessel_fuel_consumption_tpd=Decimal(str(base_inputs.vessel_class.fuel_consumption_mt_day)),
+            freight_rate_value=Decimal(str(shocked_freight_rate)),
+            freight_unit=freight_unit,
+            vlsfo_price_usd_per_mt=Decimal(str(shocked_vlsfo_price)),
+            origin_handling_rate_tpd=Decimal(str(base_inputs.origin_berth.handling_rate_tpd)),
+            dest_handling_rate_tpd=Decimal(str(base_inputs.destination_berth.handling_rate_tpd)),
+            origin_waiting_hours=Decimal(str(base_inputs.origin_waiting_hours)),
+            dest_waiting_hours=Decimal(str(base_inputs.destination_waiting_hours)),
+            scenario_delay_hours=Decimal(str(shock.delay_hours)),
         )
+        cost_result = calculate_cost(canonical_inputs, base_inputs.cost_reference_date)
+        cost_breakdown = _to_cost_breakdown(cost_result)
 
         risk_level = RiskEvaluator.evaluate_scenario_risk(
             congestion_level=shock.congestion_level,

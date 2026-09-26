@@ -1,5 +1,25 @@
 """DockTech V1 repositories package."""
 
-from backend.app.repositories.scenario_repository import ScenarioRepository
+__all__ = [
+    "ReferenceRepositoryProtocol",
+    "CSVReferenceRepository",
+    "PortRecord",
+    "BerthRecord",
+    "VesselClassRecord",
+    "RouteRecord",
+    "FreightRateRecord",
+    "FuelPriceRecord",
+    "PortActivityRecord",
+    "ScenarioRepository",
+]
 
-__all__ = ["ScenarioRepository"]
+
+def __getattr__(name):
+    """Load implementations lazily to avoid cost/repository import cycles."""
+    if name == "ScenarioRepository":
+        from .scenario_repository import ScenarioRepository
+        return ScenarioRepository
+    if name in __all__:
+        from . import reference_repository
+        return getattr(reference_repository, name)
+    raise AttributeError(name)
