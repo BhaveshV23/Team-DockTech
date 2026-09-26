@@ -12,12 +12,16 @@ def rmse(y_true, y_pred) -> float:
     return float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
 
 
-def mape(y_true, y_pred) -> float:
-    y_true, y_pred = np.asarray(y_true), np.asarray(y_pred)
-    mask = y_true != 0
-    if not mask.any():
+def mape(y_true, y_pred, eps: float = 1e-6) -> float:
+    y_true, y_pred = np.asarray(y_true, dtype=float), np.asarray(y_pred, dtype=float)
+    if y_true.size == 0:
         return float("nan")
-    return float(np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100)
+    denom = np.abs(y_true)
+    safe = np.where(denom > eps, True, False)
+    if not safe.any():
+        return float("nan")
+    relative = np.abs((y_true[safe] - y_pred[safe]) / denom[safe])
+    return float(np.mean(relative) * 100)
 
 
 def directional_accuracy(y_true, y_pred, previous):

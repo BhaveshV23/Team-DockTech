@@ -5,3 +5,7 @@ pytest-asyncio
 httpx
 fastapi
 pydantic
+numpy
+pandas
+scikit-learn
+joblib
