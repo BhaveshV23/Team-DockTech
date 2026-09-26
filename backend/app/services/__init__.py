@@ -1,11 +1,6 @@
-"""
-DockTech V1 — Application Services Package
-=============================================
-Exports application-layer service orchestrators.
-"""
+"""DockTech V1 services package."""
 
 from .cost_service import CostEngineService
+from .scenario_service import ScenarioService
 
-__all__ = [
-    "CostEngineService",
-]
+__all__ = ["CostEngineService", "ScenarioService"]

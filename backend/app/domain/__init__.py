@@ -1,16 +1,67 @@
-"""
-DockTech V1 — Domain Layer
-"""
+"""DockTech V1 domain layer package."""
+
 from backend.app.domain.constants import (
     CANONICAL_COMMODITIES,
     CANONICAL_VESSEL_CLASSES,
+    Commodity,
+    CongestionLevel,
+    ContractHorizon,
+    ContractStrategy,
     FeasibilityStatus,
+    FreightUnit,
+    MarketEntryAction,
+    MarineFuelType,
     RejectionReasonCode,
+    RiskLevel,
+    ScenarioType,
+    UserRole,
+)
+from backend.app.domain.entities import (
+    Berth,
+    CargoRequest,
+    DecisionInputs,
+    Port,
+    Route,
+    ScenarioDefault,
+    ScenarioResult,
+    ScenarioResultSet,
+    VesselClass,
+    VoyageCostBreakdown,
+)
+from backend.app.domain.risk import RiskEvaluator
+from backend.app.domain.scenario import (
+    ScenarioComparison,
+    ScenarioEngine,
+    ScenarioParameterShock,
 )
 
 __all__ = [
     "CANONICAL_COMMODITIES",
     "CANONICAL_VESSEL_CLASSES",
+    "Commodity",
+    "CongestionLevel",
+    "ContractHorizon",
+    "ContractStrategy",
     "FeasibilityStatus",
+    "FreightUnit",
+    "MarketEntryAction",
+    "MarineFuelType",
     "RejectionReasonCode",
+    "RiskLevel",
+    "ScenarioType",
+    "UserRole",
+    "Berth",
+    "CargoRequest",
+    "DecisionInputs",
+    "Port",
+    "Route",
+    "ScenarioDefault",
+    "ScenarioResult",
+    "ScenarioResultSet",
+    "VesselClass",
+    "VoyageCostBreakdown",
+    "RiskEvaluator",
+    "ScenarioComparison",
+    "ScenarioEngine",
+    "ScenarioParameterShock",
 ]

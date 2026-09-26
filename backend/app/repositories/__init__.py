@@ -1,8 +1,4 @@
-"""
-DockTech V1 — Repositories Package
-===================================
-Exports repository interfaces and implementations for DockTech reference and application data.
-"""
+"""DockTech V1 repositories package."""
 
 from .reference_repository import (
     BerthRecord,
@@ -26,4 +22,16 @@ __all__ = [
     "FreightRateRecord",
     "FuelPriceRecord",
     "PortActivityRecord",
+    "ScenarioRepository",
 ]
+
+
+def __getattr__(name):
+    """Load implementations lazily to avoid cost/repository import cycles."""
+    if name == "ScenarioRepository":
+        from .scenario_repository import ScenarioRepository
+        return ScenarioRepository
+    if name in __all__:
+        from . import reference_repository
+        return getattr(reference_repository, name)
+    raise AttributeError(name)

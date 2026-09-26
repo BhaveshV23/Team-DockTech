@@ -1,24 +1,78 @@
-"""
-DockTech V1 — Domain Constants
-Authoritative definitions for commodities, vessel classes, feasibility statuses, and rejection reason codes.
-Sources: PRD.md, DATA_DICTIONARY.md, ARCHITECTURE.md
-"""
+"""Authoritative domain constants and controlled vocabularies for DockTech V1."""
 
 from enum import Enum
 from typing import Final, FrozenSet
 
 
-# ==============================================================================
-# CANONICAL COMMODITIES & VESSEL CLASSES
-# ==============================================================================
+class ScenarioType(str, Enum):
+    BASELINE = "BASELINE"
+    ADVERSE = "ADVERSE"
+    FAVORABLE = "FAVORABLE"
 
-COMMODITY_THERMAL_COAL: Final[str] = "THERMAL_COAL"
-COMMODITY_COKING_COAL: Final[str] = "COKING_COAL"
 
-CANONICAL_COMMODITIES: Final[FrozenSet[str]] = frozenset({
-    COMMODITY_THERMAL_COAL,
-    COMMODITY_COKING_COAL,
-})
+class RiskLevel(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+
+
+class CongestionLevel(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+
+
+class FreightUnit(str, Enum):
+    USD_PER_MT = "USD_PER_MT"
+    USD_PER_DAY = "USD_PER_DAY"
+
+
+class MarineFuelType(str, Enum):
+    VLSFO = "VLSFO"
+    MGO = "MGO"
+
+
+class MarketEntryAction(str, Enum):
+    FIX_NOW = "FIX_NOW"
+    WAIT = "WAIT"
+
+
+class ContractStrategy(str, Enum):
+    SPOT = "SPOT"
+    SHORT_TERM_MULTIPLE_VOYAGE = "SHORT_TERM_MULTIPLE_VOYAGE"
+
+
+class Commodity(str, Enum):
+    THERMAL_COAL = "THERMAL_COAL"
+    COKING_COAL = "COKING_COAL"
+
+
+class ContractHorizon(str, Enum):
+    SPOT = "SPOT"
+    SHORT_TERM = "SHORT_TERM"
+    FLEXIBLE = "FLEXIBLE"
+
+
+class UserRole(str, Enum):
+    VIEWER = "VIEWER"
+    PLANNER = "PLANNER"
+    MANAGER = "MANAGER"
+    ADMINISTRATOR = "ADMINISTRATOR"
+
+
+class DataType(str, Enum):
+    SYNTHETIC = "SYNTHETIC"
+    PROXY = "PROXY"
+    ACTUAL = "ACTUAL"
+    ESTIMATED = "ESTIMATED"
+
+
+COMMODITY_THERMAL_COAL: Final[str] = Commodity.THERMAL_COAL.value
+COMMODITY_COKING_COAL: Final[str] = Commodity.COKING_COAL.value
+CANONICAL_COMMODITIES: Final[FrozenSet[str]] = frozenset(
+    {COMMODITY_THERMAL_COAL, COMMODITY_COKING_COAL}
+)
+
 
 VESSEL_CLASS_HANDYSIZE: Final[str] = "HANDYSIZE"
 VESSEL_CLASS_SUPRAMAX: Final[str] = "SUPRAMAX"
@@ -26,20 +80,17 @@ VESSEL_CLASS_ULTRAMAX: Final[str] = "ULTRAMAX"
 VESSEL_CLASS_PANAMAX: Final[str] = "PANAMAX"
 VESSEL_CLASS_KAMSARMAX: Final[str] = "KAMSARMAX"
 VESSEL_CLASS_CAPESIZE: Final[str] = "CAPESIZE"
+CANONICAL_VESSEL_CLASSES: Final[FrozenSet[str]] = frozenset(
+    {
+        VESSEL_CLASS_HANDYSIZE,
+        VESSEL_CLASS_SUPRAMAX,
+        VESSEL_CLASS_ULTRAMAX,
+        VESSEL_CLASS_PANAMAX,
+        VESSEL_CLASS_KAMSARMAX,
+        VESSEL_CLASS_CAPESIZE,
+    }
+)
 
-CANONICAL_VESSEL_CLASSES: Final[FrozenSet[str]] = frozenset({
-    VESSEL_CLASS_HANDYSIZE,
-    VESSEL_CLASS_SUPRAMAX,
-    VESSEL_CLASS_ULTRAMAX,
-    VESSEL_CLASS_PANAMAX,
-    VESSEL_CLASS_KAMSARMAX,
-    VESSEL_CLASS_CAPESIZE,
-})
-
-
-# ==============================================================================
-# FEASIBILITY STATUSES & REASON CODES
-# ==============================================================================
 
 class FeasibilityStatus(str, Enum):
     FEASIBLE = "FEASIBLE"
@@ -48,32 +99,21 @@ class FeasibilityStatus(str, Enum):
 
 
 class RejectionReasonCode(str, Enum):
-    # Physical berth constraints at origin
     REJECTED_LOA_EXCEEDED_ORIGIN_BERTH = "REJECTED_LOA_EXCEEDED_ORIGIN_BERTH"
     REJECTED_BEAM_EXCEEDED_ORIGIN_BERTH = "REJECTED_BEAM_EXCEEDED_ORIGIN_BERTH"
     REJECTED_DRAFT_EXCEEDED_ORIGIN_BERTH = "REJECTED_DRAFT_EXCEEDED_ORIGIN_BERTH"
-
-    # Physical berth constraints at destination
     REJECTED_LOA_EXCEEDED_DESTINATION_BERTH = "REJECTED_LOA_EXCEEDED_DESTINATION_BERTH"
     REJECTED_BEAM_EXCEEDED_DESTINATION_BERTH = "REJECTED_BEAM_EXCEEDED_DESTINATION_BERTH"
     REJECTED_DRAFT_EXCEEDED_DESTINATION_BERTH = "REJECTED_DRAFT_EXCEEDED_DESTINATION_BERTH"
-
-    # Port envelope constraints
     REJECTED_ORIGIN_PORT_ENVELOPE_EXCEEDED = "REJECTED_ORIGIN_PORT_ENVELOPE_EXCEEDED"
     REJECTED_DESTINATION_PORT_ENVELOPE_EXCEEDED = "REJECTED_DESTINATION_PORT_ENVELOPE_EXCEEDED"
-
-    # Commodity & route incompatibility
     REJECTED_COMMODITY_INCOMPATIBLE = "REJECTED_COMMODITY_INCOMPATIBLE"
     ERROR_ROUTE_NOT_FOUND = "ERROR_ROUTE_NOT_FOUND"
-
-    # Insufficient feasibility data
     INSUFFICIENT_FEASIBILITY_DATA = "INSUFFICIENT_FEASIBILITY_DATA"
     INSUFFICIENT_FEASIBILITY_DATA_NO_ORIGIN_BERTH = "INSUFFICIENT_FEASIBILITY_DATA_NO_ORIGIN_BERTH"
     INSUFFICIENT_FEASIBILITY_DATA_NO_DESTINATION_BERTH = "INSUFFICIENT_FEASIBILITY_DATA_NO_DESTINATION_BERTH"
     INSUFFICIENT_FEASIBILITY_DATA_UNKNOWN_ORIGIN_PORT = "INSUFFICIENT_FEASIBILITY_DATA_UNKNOWN_ORIGIN_PORT"
     INSUFFICIENT_FEASIBILITY_DATA_UNKNOWN_DESTINATION_PORT = "INSUFFICIENT_FEASIBILITY_DATA_UNKNOWN_DESTINATION_PORT"
     INSUFFICIENT_FEASIBILITY_DATA_UNKNOWN_VESSEL_CLASS = "INSUFFICIENT_FEASIBILITY_DATA_UNKNOWN_VESSEL_CLASS"
-
-    # Input validation
     INVALID_CARGO_VOLUME = "INVALID_CARGO_VOLUME"
     SAME_ORIGIN_DESTINATION = "SAME_ORIGIN_DESTINATION"
