@@ -2,8 +2,8 @@ from datetime import datetime, timezone
 import json
 from typing import Any, Dict, List, Optional, Union
 from uuid import UUID, uuid4
-from app.repositories.audit_repository import audit_repository
-from app.schemas.audit import AuditAction, AuditEntityType, AuditEventCreate
+from ..repositories.audit_repository import audit_repository
+from ..schemas.audit import AuditAction, AuditEntityType, AuditEventCreate
 
 SENSITIVE_KEYWORDS = [
     "password",

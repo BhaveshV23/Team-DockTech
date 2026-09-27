@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 import httpx
-from app.core.config import settings
+from ..core.config import settings
 
 
 class CargoPersistenceError(Exception):

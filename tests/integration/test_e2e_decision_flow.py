@@ -5,6 +5,7 @@ Cargo Input -> Feasibility -> Forecast -> Vessel Comparison -> Cost -> Scenario/
 """
 
 from datetime import date
+from types import SimpleNamespace
 from uuid import uuid4
 import pytest
 
@@ -28,6 +29,7 @@ from backend.app.domain.entities import (
     VesselClass,
 )
 from backend.app.services.scenario_service import ScenarioService
+from backend.app.repositories.scenario_repository import ScenarioRepository
 
 
 def test_complete_e2e_chartering_decision_workflow(
@@ -85,8 +87,28 @@ def test_complete_e2e_chartering_decision_workflow(
     )
 
     # 5. Step 5: Scenario Service Simulation (BASELINE, ADVERSE, FAVORABLE)
-    scenario_service = ScenarioService()
+    class ScenarioDB:
+        def __init__(self):
+            self.rows = []
+
+        def table(self, _table_name):
+            database = self
+
+            class Table:
+                def insert(self, row):
+                    self.row = row
+                    return self
+
+                def execute(self):
+                    database.rows.append(self.row)
+                    return SimpleNamespace(data=[self.row])
+
+            return Table()
+
+    scenario_db = ScenarioDB()
+    scenario_service = ScenarioService(repository=ScenarioRepository(db_client=scenario_db))
     scenario_set = scenario_service.run_scenarios(inputs, persist=True)
+    assert len(scenario_db.rows) == 3
 
     assert scenario_set.baseline.estimated_total_cost > 0
     assert scenario_set.adverse.estimated_total_cost > scenario_set.baseline.estimated_total_cost

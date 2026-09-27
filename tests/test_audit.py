@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 import jwt
 from app.core.config import settings
 from app.repositories.audit_repository import audit_repository
-from app.repositories.cargo_repository import cargo_repository
 from app.repositories.user_repository import user_repository
 from app.schemas.audit import AuditAction, AuditEntityType, AuditEventCreate
 from app.services.audit_service import audit_service, scrub_sensitive_data
@@ -214,10 +213,9 @@ def test_invalid_action_or_entity_type_raises_value_error():
         )
 
 
-def test_authenticated_cargo_creation_produces_audit_event():
+def test_authenticated_cargo_creation_produces_audit_event(fake_supabase_cargo_table):
     """Verify authenticated cargo request creation automatically logs CREATE / CARGO_REQUEST audit event."""
     audit_repository.clear_mock_logs()
-    cargo_repository.clear_mock_requests()
     user_repository.clear_mock_profiles()
 
     token, profile = helper_create_test_user("Cargo Creator", "PLANNER")
@@ -261,7 +259,6 @@ def test_authenticated_cargo_creation_produces_audit_event():
         assert details["destination_port_id"] == "VISAKHAPATNAM"
     finally:
         audit_repository.clear_mock_logs()
-        cargo_repository.clear_mock_requests()
         user_repository.clear_mock_profiles()
 
 

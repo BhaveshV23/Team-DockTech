@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 import jwt
 from app.core.config import settings
 from app.repositories.cargo_repository import cargo_repository
-import app.repositories.cargo_repository as cargo_repository_module
 from app.repositories.user_repository import user_repository
 from main import app
 
@@ -22,51 +21,7 @@ TEST_JWT_SECRET = "docktech-test-jwt-secret-key-32-bytes-long"
 settings.SUPABASE_JWT_SECRET = TEST_JWT_SECRET
 
 client = TestClient(app)
-
-
-@pytest.fixture(autouse=True)
-def fake_supabase_cargo_table(monkeypatch):
-    """Exercise the Supabase REST repository boundary without a live database."""
-    rows = {}
-    state = {"fail_insert": False}
-
-    class FakeResponse:
-        def __init__(self, status_code, payload):
-            self.status_code = status_code
-            self._payload = payload
-
-        def json(self):
-            return self._payload
-
-    class FakeSupabaseClient:
-        def __init__(self, timeout=None):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-        def post(self, url, headers, json):
-            if state["fail_insert"]:
-                return FakeResponse(500, {"message": "database unavailable"})
-            rows[json["cargo_request_id"]] = dict(json)
-            return FakeResponse(201, [dict(json)])
-
-        def get(self, url, headers, params):
-            if "cargo_request_id" in params:
-                wanted = params["cargo_request_id"].removeprefix("eq.")
-                result = [rows[wanted]] if wanted in rows else []
-            else:
-                wanted_user = params["user_id"].removeprefix("eq.")
-                result = [row for row in rows.values() if row["user_id"] == wanted_user]
-            return FakeResponse(200, result)
-
-    monkeypatch.setattr(cargo_repository, "supabase_url", "https://docktech.test")
-    monkeypatch.setattr(cargo_repository, "service_role_key", "test-service-key")
-    monkeypatch.setattr(cargo_repository_module.httpx, "Client", FakeSupabaseClient)
-    return rows, state
+pytestmark = pytest.mark.usefixtures("fake_supabase_cargo_table")
 
 
 def helper_create_test_user(display_name: str = "Test User", role: str = "PLANNER"):

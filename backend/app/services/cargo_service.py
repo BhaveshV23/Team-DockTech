@@ -2,12 +2,12 @@ from datetime import datetime, timezone
 from typing import List
 from uuid import UUID, uuid4
 from fastapi import HTTPException, status
-from app.repositories.cargo_repository import CargoPersistenceError, cargo_repository
-from app.repositories.port_repository import port_repository
-from app.schemas.audit import AuditAction, AuditEntityType
-from app.schemas.auth import UserProfileResponse
-from app.schemas.cargo_request import CargoRequestCreate, CargoRequestResponse
-from app.services.audit_service import audit_service
+from ..repositories.cargo_repository import CargoPersistenceError, cargo_repository
+from ..repositories.port_repository import port_repository
+from ..schemas.audit import AuditAction, AuditEntityType
+from ..schemas.auth import UserProfileResponse
+from ..schemas.cargo_request import CargoRequestCreate, CargoRequestResponse
+from .audit_service import audit_service
 
 
 class CargoService:
