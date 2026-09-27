@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.api.v1.scenarios import router as scenarios_router
+from backend.app.api.v1.recommendations import router as recommendations_router
 
 
 def create_app() -> FastAPI:
@@ -23,6 +24,7 @@ def create_app() -> FastAPI:
 
     # Mount API v1 routers
     app.include_router(scenarios_router, prefix="/api/v1")
+    app.include_router(recommendations_router, prefix="/api/v1")
 
     @app.get("/health", tags=["Health"])
     def health_check():
