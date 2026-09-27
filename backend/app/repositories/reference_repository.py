@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import csv
 import datetime
+import httpx
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -26,6 +27,7 @@ from backend.app.domain.cost.errors import (
     VesselClassNotFoundError,
 )
 from backend.app.domain.cost.models import FreightUnit
+from backend.app.core.config import settings
 from backend.app.repositories.base import (
     _find_data_reference_dir,
     load_csv_as_dicts,
@@ -210,6 +212,7 @@ class CSVReferenceRepository:
         ] = {}
 
         self._load_all()
+
 
     def _load_all(self) -> None:
         self._load_ports()
@@ -616,6 +619,165 @@ class CSVReferenceRepository:
             )
 
         return valid[-1].freight_value
+
+
+class ReferenceDataUnavailableError(Exception):
+    """Raised when the authoritative Supabase reference store cannot be queried."""
+
+
+class ReferenceObservationNotFoundError(Exception):
+    """Raised when no dated reference observation exists before the requested date."""
+
+
+class SupabaseCostReferenceRepository:
+    """Cost reference-data access backed by the canonical Supabase tables."""
+
+    def __init__(self, supabase_url: str | None = None, service_role_key: str | None = None):
+        self.supabase_url = settings.SUPABASE_URL if supabase_url is None else supabase_url
+        self.service_role_key = (
+            settings.SUPABASE_SERVICE_ROLE_KEY
+            if service_role_key is None
+            else service_role_key
+        )
+
+    def _get(self, table: str, params: Dict[str, str]) -> List[Dict[str, Any]]:
+        if not self.supabase_url or not self.service_role_key:
+            raise ReferenceDataUnavailableError("Reference data storage is not configured")
+        url = f"{self.supabase_url.rstrip('/')}/rest/v1/{table}"
+        headers = {
+            "apikey": self.service_role_key,
+            "Authorization": f"Bearer {self.service_role_key}",
+            "Accept": "application/json",
+        }
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                response = client.get(url, headers=headers, params={"select": "*", **params})
+            if response.status_code < 200 or response.status_code >= 300:
+                raise ReferenceDataUnavailableError(
+                    f"Reference data query failed with status {response.status_code}"
+                )
+            rows = response.json()
+            if not isinstance(rows, list):
+                raise ReferenceDataUnavailableError("Reference data query returned an invalid response")
+            return rows
+        except ReferenceDataUnavailableError:
+            raise
+        except Exception as exc:
+            raise ReferenceDataUnavailableError("Reference data service is unavailable") from exc
+
+    def _one(self, table: str, params: Dict[str, str], missing_error: Exception) -> Dict[str, Any]:
+        rows = self._get(table, {**params, "limit": "1"})
+        if not rows:
+            raise missing_error
+        return rows[0]
+
+    def get_route(self, origin_port_id: str, destination_port_id: str, commodity: str) -> RouteRecord:
+        row = self._one(
+            "routes",
+            {
+                "origin_port_id": f"eq.{origin_port_id.strip()}",
+                "destination_port_id": f"eq.{destination_port_id.strip()}",
+                "commodity": f"eq.{commodity.strip()}",
+            },
+            RouteNotFoundError(
+                f"No canonical route found connecting {origin_port_id} -> {destination_port_id} for commodity '{commodity}'."
+            ),
+        )
+        return RouteRecord(
+            route_id=row["route_id"], origin_port_id=row["origin_port_id"],
+            destination_port_id=row["destination_port_id"], commodity=row["commodity"],
+            distance_nm=Decimal(str(row["distance_nm"])),
+            typical_sailing_days=Decimal(str(row["typical_sailing_days"])),
+            source=row["source"], data_type=row["data_type"],
+        )
+
+    def get_vessel_class(self, vessel_class_id: str) -> VesselClassRecord:
+        row = self._one(
+            "vessel_classes", {"vessel_class_id": f"eq.{vessel_class_id.strip().upper()}"},
+            VesselClassNotFoundError(f"Vessel class '{vessel_class_id}' does not exist in canonical vessel catalog."),
+        )
+        return VesselClassRecord(
+            vessel_class_id=row["vessel_class_id"], vessel_class_name=row["vessel_class_name"],
+            dwt_min_mt=Decimal(str(row["dwt_min_mt"])), dwt_max_mt=Decimal(str(row["dwt_max_mt"])),
+            loa_m=Decimal(str(row["loa_m"])), beam_m=Decimal(str(row["beam_m"])),
+            draft_m=Decimal(str(row["draft_m"])), speed_knots=Decimal(str(row["speed_knots"])),
+            cargo_capacity_mt=Decimal(str(row["cargo_capacity_mt"])),
+            fuel_consumption_mt_day=Decimal(str(row["fuel_consumption_mt_day"])),
+            source=row["source"], data_type=row["data_type"],
+        )
+
+    def get_compatible_berth_handling_rate(self, port_id: str, commodity: str, vessel_class: VesselClassRecord) -> Decimal:
+        rows = self._get("berths", {
+            "port_id": f"eq.{port_id.strip()}", "commodity": f"eq.{commodity.strip()}"
+        })
+        compatible = [
+            row for row in rows
+            if Decimal(str(row["max_loa_m"])) >= vessel_class.loa_m
+            and Decimal(str(row["max_beam_m"])) >= vessel_class.beam_m
+            and Decimal(str(row["max_draft_m"])) >= vessel_class.draft_m
+        ]
+        if not compatible:
+            raise InsufficientFeasibilityDataError(
+                f"Port '{port_id}' has no compatible berth for vessel class '{vessel_class.vessel_class_id}' handling commodity '{commodity}'."
+            )
+        return max(Decimal(str(row["handling_rate_tpd"])) for row in compatible)
+
+    def get_compatible_berth(self, port_id: str, commodity: str, vessel_class: VesselClassRecord) -> BerthRecord:
+        rows = self._get("berths", {
+            "port_id": f"eq.{port_id.strip()}", "commodity": f"eq.{commodity.strip()}"
+        })
+        compatible = [
+            row for row in rows
+            if Decimal(str(row["max_loa_m"])) >= vessel_class.loa_m
+            and Decimal(str(row["max_beam_m"])) >= vessel_class.beam_m
+            and Decimal(str(row["max_draft_m"])) >= vessel_class.draft_m
+        ]
+        if not compatible:
+            raise InsufficientFeasibilityDataError(
+                f"Port '{port_id}' has no compatible berth for vessel class '{vessel_class.vessel_class_id}' handling commodity '{commodity}'."
+            )
+        row = max(compatible, key=lambda item: Decimal(str(item["handling_rate_tpd"])))
+        return BerthRecord(
+            berth_id=row["berth_id"], port_id=row["port_id"], berth_name=row["berth_name"],
+            commodity=row["commodity"], max_loa_m=Decimal(str(row["max_loa_m"])),
+            max_beam_m=Decimal(str(row["max_beam_m"])), max_draft_m=Decimal(str(row["max_draft_m"])),
+            handling_rate_tpd=Decimal(str(row["handling_rate_tpd"])),
+            source=row["source"], data_type=row["data_type"],
+        )
+
+    def _latest(self, table: str, filters: Dict[str, str], date: datetime.date) -> Dict[str, Any]:
+        return self._one(
+            table,
+            {**filters, "observation_date": f"lte.{date.isoformat()}", "order": "observation_date.desc"},
+            ReferenceObservationNotFoundError(
+                "No reference observation exists on or before the cost reference date"
+            ),
+        )
+
+    def get_latest_vlsfo_price(self, cost_reference_date: datetime.date) -> Decimal:
+        try:
+            row = self._latest("fuel_prices", {"fuel_type": "eq.VLSFO"}, cost_reference_date)
+        except ReferenceObservationNotFoundError as exc:
+            raise InsufficientFuelPriceDataError(str(exc)) from exc
+        return Decimal(str(row["price_value"]))
+
+    def get_latest_port_waiting_hours(self, port_id: str, cost_reference_date: datetime.date) -> Decimal:
+        try:
+            row = self._latest("port_activity", {"port_id": f"eq.{port_id.strip()}"}, cost_reference_date)
+        except ReferenceObservationNotFoundError as exc:
+            raise InsufficientPortActivityDataError(str(exc)) from exc
+        return Decimal(str(row["average_waiting_hours"]))
+
+    def get_latest_freight_rate(self, route_id: str, vessel_class_id: str, freight_unit: FreightUnit, cost_reference_date: datetime.date) -> Decimal:
+        try:
+            row = self._latest("freight_rates", {
+                "route_id": f"eq.{route_id.strip()}",
+                "vessel_class_id": f"eq.{vessel_class_id.strip().upper()}",
+                "freight_unit": f"eq.{freight_unit.value}",
+            }, cost_reference_date)
+        except ReferenceObservationNotFoundError as exc:
+            raise InsufficientFreightDataError(str(exc)) from exc
+        return Decimal(str(row["freight_value"]))
 
 
 # ============================================================================

@@ -63,3 +63,6 @@ class PortRepository:
         if not port_id or not port_id.strip():
             return False
         return self.exists(port_id.strip())
+
+
+port_repository = PortRepository()

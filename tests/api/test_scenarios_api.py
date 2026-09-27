@@ -1,112 +1,106 @@
-"""API tests for DockTech V1 scenario endpoints."""
+"""API tests for authenticated canonical scenario operations."""
 
+from datetime import datetime, timezone
 from uuid import uuid4
-from fastapi.testclient import TestClient
-import pytest
 
+from fastapi.testclient import TestClient
+
+from backend.app.core.dependencies import get_current_user_profile
+from backend.app.domain.constants import CongestionLevel
+from backend.app.domain.scenario import ScenarioParameterShock
 from backend.app.main import app
+from backend.app.schemas.auth import UserProfileResponse
+from backend.app.services.scenario_service import ScenarioService
+from backend.app.repositories.scenario_repository import ScenarioPersistenceError
 
 client = TestClient(app)
 
 
-def test_api_get_scenario_defaults():
-    """GET /api/v1/scenarios/defaults returns 200 OK and 3 canonical presets."""
-    response = client.get("/api/v1/scenarios/defaults")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["success"] is True
-    presets = data["data"]
-    assert len(presets) == 3
-    ids = [p["scenario_id"] for p in presets]
-    assert "BASELINE" in ids
-    assert "ADVERSE" in ids
-    assert "FAVORABLE" in ids
+def _profile():
+    uid = uuid4()
+    return UserProfileResponse(
+        user_id=uid, auth_user_id=uuid4(), display_name="Planner", email="planner@example.test",
+        role="PLANNER", created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc),
+    )
 
 
-def test_api_run_canonical_scenarios():
-    """POST /api/v1/scenarios/run-canonical returns BASELINE, ADVERSE, FAVORABLE."""
-    payload = {
-        "cargo_request_id": str(uuid4()),
-        "commodity": "THERMAL_COAL",
-        "cargo_volume_mt": 75000.0,
-        "vessel_class_id": "PANAMAX",
-        "speed_knots": 13.0,
-        "cargo_capacity_mt": 75000.0,
-        "fuel_consumption_mt_day": 28.0,
-        "origin_berth_handling_rate_tpd": 50000.0,
-        "destination_berth_handling_rate_tpd": 30000.0,
-        "distance_nm": 5600.0,
-        "base_freight_rate": 18.50,
-        "freight_unit": "USD_PER_MT",
-        "base_vlsfo_price_usd_mt": 620.0,
-        "origin_waiting_hours": 12.0,
-        "destination_waiting_hours": 36.0,
-        "forecast_spread_pct": 8.0,
-    }
-    response = client.post("/api/v1/scenarios/run-canonical", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["success"] is True
-    sc_set = data["data"]
-    assert sc_set["baseline"]["scenario_type"] == "BASELINE"
-    assert sc_set["adverse"]["scenario_type"] == "ADVERSE"
-    assert sc_set["favorable"]["scenario_type"] == "FAVORABLE"
-    assert sc_set["adverse"]["freight_change_pct"] == 25.0
-    assert sc_set["adverse"]["delay_hours"] == 48.0
+def test_scenario_endpoints_require_authentication():
+    app.dependency_overrides.pop(get_current_user_profile, None)
+    assert client.get("/api/v1/scenarios/defaults").status_code == 401
+    ids = {"cargo_request_id": str(uuid4()), "forecast_run_id": str(uuid4())}
+    assert client.post("/api/v1/scenarios/run-canonical", json=ids).status_code == 401
+    assert client.post("/api/v1/scenarios/evaluate", json=ids).status_code == 401
 
 
-def test_api_evaluate_custom_scenario():
-    """POST /api/v1/scenarios/evaluate returns comparison with baseline."""
-    payload = {
-        "cargo_request_id": str(uuid4()),
-        "commodity": "THERMAL_COAL",
-        "cargo_volume_mt": 75000.0,
-        "vessel_class_id": "PANAMAX",
-        "speed_knots": 13.0,
-        "cargo_capacity_mt": 75000.0,
-        "fuel_consumption_mt_day": 28.0,
-        "origin_berth_handling_rate_tpd": 50000.0,
-        "destination_berth_handling_rate_tpd": 30000.0,
-        "distance_nm": 5600.0,
-        "base_freight_rate": 18.50,
-        "freight_unit": "USD_PER_MT",
-        "base_vlsfo_price_usd_mt": 620.0,
-        "origin_waiting_hours": 12.0,
-        "destination_waiting_hours": 36.0,
-        "freight_change_pct": 20.0,
-        "fuel_change_pct": 10.0,
-        "delay_hours": 24.0,
-        "congestion_level": "HIGH",
-        "forecast_spread_pct": 15.0,
-    }
-    response = client.post("/api/v1/scenarios/evaluate", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["success"] is True
-    comparison = data["data"]
-    assert comparison["delta_cost_usd"] > 0
-    assert comparison["delta_turnaround_hours"] == 24.0
-    assert comparison["scenario_result"]["risk_level"] == "HIGH"
+def test_authenticated_requests_pass_only_canonical_ids_and_shock(sample_decision_inputs):
+    profile = _profile()
+    calls = {}
+    base_service = ScenarioService()
+
+    class ServiceDouble:
+        def get_scenario_defaults(self):
+            return base_service.get_scenario_defaults()
+
+        def run_canonical_for_cargo(self, cargo_request_id, forecast_run_id, user_profile):
+            calls["run"] = (cargo_request_id, forecast_run_id, user_profile)
+            return base_service.run_scenarios(sample_decision_inputs, persist=False)
+
+        def evaluate_canonical_for_cargo(self, cargo_request_id, forecast_run_id, user_profile, shock):
+            calls["evaluate"] = (cargo_request_id, forecast_run_id, user_profile, shock)
+            return base_service.evaluate_custom_scenario(sample_decision_inputs, shock, persist=False)
+
+    from backend.app.api.v1.scenarios import get_scenario_service
+    app.dependency_overrides[get_current_user_profile] = lambda: profile
+    app.dependency_overrides[get_scenario_service] = lambda: ServiceDouble()
+    try:
+        cargo_id, forecast_id = uuid4(), uuid4()
+        response = client.post("/api/v1/scenarios/run-canonical", json={
+            "cargo_request_id": str(cargo_id), "forecast_run_id": str(forecast_id),
+        })
+        assert response.status_code == 200
+        assert calls["run"] == (cargo_id, forecast_id, profile)
+        evaluate = client.post("/api/v1/scenarios/evaluate", json={
+            "cargo_request_id": str(cargo_id), "forecast_run_id": str(forecast_id),
+            "freight_change_pct": 12, "fuel_change_pct": 5, "delay_hours": 8,
+            "congestion_level": "HIGH",
+        })
+        assert evaluate.status_code == 200
+        assert calls["evaluate"][:3] == (cargo_id, forecast_id, profile)
+        assert calls["evaluate"][3] == ScenarioParameterShock(12, 5, 8, CongestionLevel.HIGH)
+    finally:
+        app.dependency_overrides.clear()
 
 
-def test_api_invalid_request_returns_422():
-    """POST /api/v1/scenarios/evaluate with invalid cargo volume returns 422."""
-    payload = {
-        "cargo_request_id": str(uuid4()),
-        "commodity": "THERMAL_COAL",
-        "cargo_volume_mt": -500.0,  # Invalid negative volume
-        "vessel_class_id": "PANAMAX",
-        "speed_knots": 13.0,
-        "cargo_capacity_mt": 75000.0,
-        "fuel_consumption_mt_day": 28.0,
-        "origin_berth_handling_rate_tpd": 50000.0,
-        "destination_berth_handling_rate_tpd": 30000.0,
-        "distance_nm": 5600.0,
-        "base_freight_rate": 18.50,
-        "freight_unit": "USD_PER_MT",
-        "base_vlsfo_price_usd_mt": 620.0,
-        "origin_waiting_hours": 12.0,
-        "destination_waiting_hours": 36.0,
-    }
-    response = client.post("/api/v1/scenarios/evaluate", json=payload)
-    assert response.status_code == 422
+def test_client_cannot_supply_competing_canonical_inputs():
+    profile = _profile()
+    app.dependency_overrides[get_current_user_profile] = lambda: profile
+    try:
+        response = client.post("/api/v1/scenarios/run-canonical", json={
+            "cargo_request_id": str(uuid4()), "forecast_run_id": str(uuid4()),
+            "cargo_volume_mt": 1,
+        })
+        assert response.status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_database_persistence_failure_returns_structured_503():
+    profile = _profile()
+
+    class FailingService:
+        def run_canonical_for_cargo(self, **kwargs):
+            raise ScenarioPersistenceError("database unavailable")
+
+    from backend.app.api.v1.scenarios import get_scenario_service
+    app.dependency_overrides[get_current_user_profile] = lambda: profile
+    app.dependency_overrides[get_scenario_service] = lambda: FailingService()
+    try:
+        response = client.post("/api/v1/scenarios/run-canonical", json={
+            "cargo_request_id": str(uuid4()), "forecast_run_id": str(uuid4()),
+        })
+        assert response.status_code == 503
+        assert response.json()["detail"] == {
+            "code": "ERROR_SCENARIO_DATA_UNAVAILABLE", "message": "database unavailable",
+        }
+    finally:
+        app.dependency_overrides.clear()

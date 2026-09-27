@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from app.core.dependencies import get_current_user_profile
+from app.schemas.auth import UserProfileResponse
 from backend.app.services.feasibility_service import FeasibilityService
 
 
@@ -30,7 +32,7 @@ class FeasibilityResponse(BaseModel):
     destination_port_id: str
     commodity: str
     cargo_volume_mt: float
-    required_voyages: int
+    required_voyages: int | None = None
     rejection_reason_code: str | None = None
     rejection_reason: str | None = None
 
@@ -41,6 +43,7 @@ class FeasibilityResponse(BaseModel):
 )
 def check_feasibility(
     request: FeasibilityRequest,
+    current_user: UserProfileResponse = Depends(get_current_user_profile),
 ) -> FeasibilityResponse:
 
     try:
@@ -54,7 +57,11 @@ def check_feasibility(
 
         return FeasibilityResponse(
             is_feasible=result.is_feasible,
-            status=str(result.status),
+            status=(
+                result.status.value
+                if hasattr(result.status, "value")
+                else str(result.status)
+            ),
             vessel_class_id=request.vessel_class_id,
             origin_port_id=request.origin_port_id,
             destination_port_id=request.destination_port_id,

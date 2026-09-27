@@ -4,102 +4,82 @@ import httpx
 from app.core.config import settings
 
 
+class CargoPersistenceError(Exception):
+    """Raised when the authoritative cargo_requests store is unavailable."""
+
+
 class CargoRepository:
-    """Repository for persisting and querying cargo_requests in Supabase or local mock storage."""
+    """Repository for persisting and querying cargo_requests in Supabase PostgreSQL."""
 
     def __init__(self):
         self.supabase_url = settings.SUPABASE_URL
         self.service_role_key = settings.SUPABASE_SERVICE_ROLE_KEY
-        self._mock_cargo_requests: Dict[str, Dict[str, Any]] = {}
 
-    def clear_mock_requests(self) -> None:
-        """Clear mock cargo requests (used for test isolation)."""
-        self._mock_cargo_requests.clear()
+    def _configuration(self) -> tuple[str, Dict[str, str]]:
+        if not self.supabase_url or not self.service_role_key:
+            raise CargoPersistenceError("Cargo persistence is not configured")
+        return (
+            f"{self.supabase_url.rstrip('/')}/rest/v1/cargo_requests",
+            {
+                "apikey": self.service_role_key,
+                "Authorization": f"Bearer {self.service_role_key}",
+                "Accept": "application/json",
+            },
+        )
+
+    @staticmethod
+    def _raise_for_database_error(response: httpx.Response) -> None:
+        if response.status_code < 200 or response.status_code >= 300:
+            raise CargoPersistenceError(
+                f"Cargo persistence request failed with status {response.status_code}"
+            )
+
+    @staticmethod
+    def _raise_for_transport_error(exc: Exception) -> None:
+        raise CargoPersistenceError("Cargo persistence service is unavailable") from exc
 
     def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        cargo_request_id = str(data["cargo_request_id"])
-
-        # 1. Save in mock storage
-        self._mock_cargo_requests[cargo_request_id] = data
-
-        # 2. Persist to Supabase REST API if configured
-        if self.supabase_url and self.service_role_key:
-            url = f"{self.supabase_url.rstrip('/')}/rest/v1/cargo_requests"
-            headers = {
-                "apikey": self.service_role_key,
-                "Authorization": f"Bearer {self.service_role_key}",
-                "Content-Type": "application/json",
-                "Prefer": "return=representation",
-            }
-            try:
-                with httpx.Client(timeout=10.0) as client:
-                    resp = client.post(url, headers=headers, json=data)
-                    if resp.status_code in [200, 201] and resp.json():
-                        return resp.json()[0]
-            except Exception:
-                pass
-
-        return data
+        url, headers = self._configuration()
+        headers = {**headers, "Content-Type": "application/json", "Prefer": "return=representation"}
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                response = client.post(url, headers=headers, json=data)
+            self._raise_for_database_error(response)
+            records = response.json()
+            if not records or not isinstance(records, list):
+                raise CargoPersistenceError("Cargo persistence returned no saved record")
+            return records[0]
+        except CargoPersistenceError:
+            raise
+        except Exception as exc:
+            self._raise_for_transport_error(exc)
 
     def get_by_id(self, cargo_request_id: UUID) -> Optional[Dict[str, Any]]:
-        req_id_str = str(cargo_request_id)
-
-        # 1. Check mock storage first
-        if req_id_str in self._mock_cargo_requests:
-            return self._mock_cargo_requests[req_id_str]
-
-        # 2. Query Supabase REST API if configured
-        if self.supabase_url and self.service_role_key:
-            url = f"{self.supabase_url.rstrip('/')}/rest/v1/cargo_requests"
-            headers = {
-                "apikey": self.service_role_key,
-                "Authorization": f"Bearer {self.service_role_key}",
-                "Accept": "application/json",
-            }
-            params = {"cargo_request_id": f"eq.{req_id_str}", "select": "*"}
-            try:
-                with httpx.Client(timeout=10.0) as client:
-                    resp = client.get(url, headers=headers, params=params)
-                    if resp.status_code == 200:
-                        records = resp.json()
-                        if records and len(records) > 0:
-                            return records[0]
-            except Exception:
-                pass
-
-        return None
+        url, headers = self._configuration()
+        params = {"cargo_request_id": f"eq.{cargo_request_id}", "select": "*"}
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                response = client.get(url, headers=headers, params=params)
+            self._raise_for_database_error(response)
+            records = response.json()
+            return records[0] if records else None
+        except CargoPersistenceError:
+            raise
+        except Exception as exc:
+            self._raise_for_transport_error(exc)
 
     def get_by_user_id(self, user_id: UUID) -> List[Dict[str, Any]]:
-        user_id_str = str(user_id)
-        results: List[Dict[str, Any]] = []
-
-        # 1. Filter mock storage
-        for item in self._mock_cargo_requests.values():
-            if str(item.get("user_id")) == user_id_str:
-                results.append(item)
-
-        # 2. Query Supabase REST API if configured
-        if self.supabase_url and self.service_role_key:
-            url = f"{self.supabase_url.rstrip('/')}/rest/v1/cargo_requests"
-            headers = {
-                "apikey": self.service_role_key,
-                "Authorization": f"Bearer {self.service_role_key}",
-                "Accept": "application/json",
-            }
-            params = {"user_id": f"eq.{user_id_str}", "select": "*"}
-            try:
-                with httpx.Client(timeout=10.0) as client:
-                    resp = client.get(url, headers=headers, params=params)
-                    if resp.status_code == 200:
-                        db_records = resp.json()
-                        existing_ids = {r["cargo_request_id"] for r in results}
-                        for rec in db_records:
-                            if rec["cargo_request_id"] not in existing_ids:
-                                results.append(rec)
-            except Exception:
-                pass
-
-        return results
+        url, headers = self._configuration()
+        params = {"user_id": f"eq.{user_id}", "select": "*"}
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                response = client.get(url, headers=headers, params=params)
+            self._raise_for_database_error(response)
+            return response.json()
+        except CargoPersistenceError:
+            raise
+        except Exception as exc:
+            self._raise_for_transport_error(exc)
 
 
 cargo_repository = CargoRepository()

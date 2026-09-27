@@ -3,13 +3,10 @@
 from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from backend.app.domain.constants import (
-    Commodity,
     CongestionLevel,
-    ContractHorizon,
-    FreightUnit,
     RiskLevel,
     ScenarioType,
 )
@@ -74,21 +71,10 @@ class CanonicalScenarioSetResponse(BaseModel):
 
 
 class ScenarioEvaluateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     cargo_request_id: UUID
-    commodity: Commodity
-    cargo_volume_mt: float = Field(gt=0, description="Total cargo quantity in metric tonnes")
-    vessel_class_id: str
-    speed_knots: float = Field(gt=0)
-    cargo_capacity_mt: float = Field(gt=0)
-    fuel_consumption_mt_day: float = Field(gt=0)
-    origin_berth_handling_rate_tpd: float = Field(gt=0)
-    destination_berth_handling_rate_tpd: float = Field(gt=0)
-    distance_nm: float = Field(ge=0)
-    base_freight_rate: float = Field(gt=0)
-    freight_unit: FreightUnit
-    base_vlsfo_price_usd_mt: float = Field(gt=0)
-    origin_waiting_hours: float = Field(ge=0)
-    destination_waiting_hours: float = Field(ge=0)
+    forecast_run_id: UUID
     freight_change_pct: float = 0.0
     fuel_change_pct: float = 0.0
     delay_hours: float = Field(ge=0, default=0.0)
@@ -97,19 +83,7 @@ class ScenarioEvaluateRequest(BaseModel):
 
 
 class RunCanonicalScenariosRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     cargo_request_id: UUID
-    commodity: Commodity
-    cargo_volume_mt: float = Field(gt=0)
-    vessel_class_id: str
-    speed_knots: float = Field(gt=0)
-    cargo_capacity_mt: float = Field(gt=0)
-    fuel_consumption_mt_day: float = Field(gt=0)
-    origin_berth_handling_rate_tpd: float = Field(gt=0)
-    destination_berth_handling_rate_tpd: float = Field(gt=0)
-    distance_nm: float = Field(ge=0)
-    base_freight_rate: float = Field(gt=0)
-    freight_unit: FreightUnit
-    base_vlsfo_price_usd_mt: float = Field(gt=0)
-    origin_waiting_hours: float = Field(ge=0)
-    destination_waiting_hours: float = Field(ge=0)
-    forecast_spread_pct: float = Field(ge=0, default=0.0)
+    forecast_run_id: UUID

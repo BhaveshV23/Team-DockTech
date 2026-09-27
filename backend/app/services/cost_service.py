@@ -23,11 +23,15 @@ from __future__ import annotations
 import datetime
 from decimal import Decimal
 from typing import Optional
+from uuid import UUID
 
 from backend.app.domain.cost.engine import calculate_cost
+from backend.app.domain.cost.errors import CostDomainError
 from backend.app.domain.cost.models import CostInputs, CostResult, FreightUnit
 from backend.app.domain.cost.resolver import CostInputResolver
+from backend.app.repositories.forecast_repository import forecast_repository
 from backend.app.repositories.reference_repository import ReferenceRepositoryProtocol
+from backend.app.schemas.auth import UserProfileResponse
 
 
 class CostEngineService:
@@ -45,6 +49,7 @@ class CostEngineService:
     """
 
     def __init__(self, repository: ReferenceRepositoryProtocol) -> None:
+        self.repository = repository
         self._resolver = CostInputResolver(repository=repository)
 
     def calculate(
@@ -121,3 +126,79 @@ class CostEngineService:
         )
 
         return result
+
+
+class CostContextError(CostDomainError):
+    """Raised when cargo and forecast records do not form a valid cost context."""
+
+    def __init__(self, message: str, code: str = "ERROR_COST_CONTEXT_INVALID") -> None:
+        super().__init__(message, code=code)
+
+
+class CostApplicationService:
+    """Resolve the authorized cargo and forecast context before costing it."""
+
+    def __init__(
+        self,
+        engine: CostEngineService,
+        cargo_access_service=None,
+        forecast_repo=forecast_repository,
+    ) -> None:
+        self.engine = engine
+        if cargo_access_service is None:
+            from backend.app.services.cargo_service import cargo_service
+
+            cargo_access_service = cargo_service
+        self.cargo_access_service = cargo_access_service
+        self.forecast_repo = forecast_repo
+
+    def calculate_for_forecast(
+        self,
+        cargo_request_id: UUID,
+        forecast_run_id: UUID,
+        user_profile: UserProfileResponse,
+        freight_rate_override: Optional[Decimal] = None,
+        scenario_delay_hours: Decimal = Decimal("0.0"),
+        freight_adjustment_pct: Decimal = Decimal("0.0"),
+        fuel_adjustment_pct: Decimal = Decimal("0.0"),
+        port_costs_usd: Decimal = Decimal("0.0"),
+    ) -> CostResult:
+        cargo = self.cargo_access_service.get_cargo_request(
+            cargo_request_id, user_profile
+        )
+
+        forecast = self.forecast_repo.get_forecast_run(forecast_run_id)
+        if not forecast:
+            raise CostContextError("Forecast run not found", "ERROR_FORECAST_RUN_NOT_FOUND")
+        if str(forecast.get("cargo_request_id")) != str(cargo_request_id):
+            raise CostContextError("Forecast run does not belong to the cargo request")
+
+        route = self.engine.repository.get_route(
+            origin_port_id=cargo.origin_port_id,
+            destination_port_id=cargo.destination_port_id,
+            commodity=cargo.commodity,
+        )
+        if forecast.get("route_id") != route.route_id:
+            raise CostContextError("Forecast route does not match the cargo request")
+
+        try:
+            reference_date = datetime.date.fromisoformat(
+                str(forecast["training_data_end_date"])
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise CostContextError("Forecast run has no valid training data end date") from exc
+
+        return self.engine.calculate(
+            cargo_volume_mt=Decimal(str(cargo.cargo_volume_mt)),
+            origin_port_id=cargo.origin_port_id,
+            destination_port_id=cargo.destination_port_id,
+            commodity=cargo.commodity,
+            vessel_class_id=forecast["vessel_class_id"],
+            freight_unit=FreightUnit.from_str(forecast["freight_unit"]),
+            cost_reference_date=reference_date,
+            freight_rate_override=freight_rate_override,
+            scenario_delay_hours=scenario_delay_hours,
+            freight_adjustment_pct=freight_adjustment_pct,
+            fuel_adjustment_pct=fuel_adjustment_pct,
+            port_costs_usd=port_costs_usd,
+        )

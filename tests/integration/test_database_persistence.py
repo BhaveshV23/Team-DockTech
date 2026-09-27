@@ -1,33 +1,44 @@
 """Database persistence and integrity tests for scenarios table."""
 
-from uuid import uuid4
-import pytest
+from types import SimpleNamespace
 
-from backend.app.domain.constants import CongestionLevel, RiskLevel, ScenarioType
-from backend.app.domain.entities import DecisionInputs, ScenarioResult
+from backend.app.domain.constants import CongestionLevel, ScenarioType
+from backend.app.domain.entities import DecisionInputs
 from backend.app.repositories.scenario_repository import ScenarioRepository
 from backend.app.services.scenario_service import ScenarioService
 
 
-def test_scenario_persistence_in_memory_and_query(
+def test_scenario_persistence_uses_database_adapter(
     sample_decision_inputs: DecisionInputs,
 ):
-    """Verify ScenarioRepository persists and retrieves scenarios for a cargo request."""
-    repo = ScenarioRepository()
+    """Verify scenario results are inserted through the repository database adapter."""
+    class DB:
+        def __init__(self):
+            self.rows = []
+
+        def table(self, _name):
+            db = self
+            class Table:
+                def insert(self, row):
+                    self.row = row
+                    return self
+
+                def execute(self):
+                    db.rows.append(self.row)
+                    return SimpleNamespace(data=[self.row])
+            return Table()
+
+    db = DB()
+    repo = ScenarioRepository(db_client=db)
     service = ScenarioService(repository=repo)
     results = service.run_scenarios(sample_decision_inputs, persist=True)
 
     cargo_req_id = sample_decision_inputs.cargo_request.cargo_request_id
-    stored = repo.get_scenarios_by_cargo_request(cargo_req_id)
-
-    assert len(stored) == 3
-    types = {r.scenario_type for r in stored}
-    assert types == {ScenarioType.BASELINE, ScenarioType.ADVERSE, ScenarioType.FAVORABLE}
-
-    for r in stored:
-        assert r.cargo_request_id == cargo_req_id
-        assert r.estimated_total_cost > 0
-        assert r.risk_level in [RiskLevel.LOW, RiskLevel.MEDIUM, RiskLevel.HIGH]
+    assert len(db.rows) == 3
+    assert {r["scenario_type"] for r in db.rows} == {"BASELINE", "ADVERSE", "FAVORABLE"}
+    assert all(r["cargo_request_id"] == str(cargo_req_id) for r in db.rows)
+    assert all(r["estimated_total_cost"] > 0 for r in db.rows)
+    assert len(results.as_list()) == 3
 
 
 def test_scenario_defaults_csv_integrity():

@@ -1,14 +1,21 @@
 from __future__ import annotations
 
-import datetime
 from decimal import Decimal
+from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, ConfigDict, Field
 
-from backend.app.domain.cost.models import FreightUnit
-from backend.app.repositories.reference_repository import reference_repository
-from backend.app.services.cost_service import CostEngineService
+from app.core.dependencies import get_current_user_profile
+from app.schemas.auth import UserProfileResponse
+from backend.app.domain.cost.errors import CostDomainError
+from backend.app.repositories.cargo_repository import CargoPersistenceError
+from backend.app.repositories.forecast_repository import ForecastPersistenceError
+from backend.app.repositories.reference_repository import (
+    ReferenceDataUnavailableError,
+    SupabaseCostReferenceRepository,
+)
+from backend.app.services.cost_service import CostApplicationService, CostEngineService
 
 
 router = APIRouter(
@@ -17,19 +24,17 @@ router = APIRouter(
 )
 
 
-cost_service = CostEngineService(
-    repository=reference_repository,
+cost_reference_repository = SupabaseCostReferenceRepository()
+cost_service = CostApplicationService(
+    engine=CostEngineService(repository=cost_reference_repository),
 )
 
 
 class CostRequest(BaseModel):
-    cargo_volume_mt: Decimal = Field(..., gt=0)
-    origin_port_id: str = Field(..., min_length=1)
-    destination_port_id: str = Field(..., min_length=1)
-    commodity: str = Field(..., min_length=1)
-    vessel_class_id: str = Field(..., min_length=1)
-    freight_unit: str = Field(..., min_length=1)
-    cost_reference_date: datetime.date
+    model_config = ConfigDict(extra="forbid")
+
+    cargo_request_id: UUID
+    forecast_run_id: UUID
 
     freight_rate_override: Decimal | None = Field(
         default=None,
@@ -87,17 +92,14 @@ class CostResponse(BaseModel):
 )
 def calculate_cost(
     request: CostRequest,
+    current_user: UserProfileResponse = Depends(get_current_user_profile),
 ) -> CostResponse:
 
     try:
-        result = cost_service.calculate(
-            cargo_volume_mt=request.cargo_volume_mt,
-            origin_port_id=request.origin_port_id,
-            destination_port_id=request.destination_port_id,
-            commodity=request.commodity,
-            vessel_class_id=request.vessel_class_id,
-            freight_unit=FreightUnit.from_str(request.freight_unit),
-            cost_reference_date=request.cost_reference_date,
+        result = cost_service.calculate_for_forecast(
+            cargo_request_id=request.cargo_request_id,
+            forecast_run_id=request.forecast_run_id,
+            user_profile=current_user,
             freight_rate_override=request.freight_rate_override,
             scenario_delay_hours=request.scenario_delay_hours,
             freight_adjustment_pct=request.freight_adjustment_pct,
@@ -138,8 +140,33 @@ def calculate_cost(
             assumptions=list(result.assumptions),
         )
 
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "code": "ERROR_COST_DATA_UNAVAILABLE",
+                    "message": "Cost data is unavailable",
+                },
+            ) from exc
+        raise
+    except CostDomainError as exc:
+        status_code = (
+            status.HTTP_404_NOT_FOUND
+            if exc.code in {"ERROR_CARGO_REQUEST_NOT_FOUND", "ERROR_FORECAST_RUN_NOT_FOUND"}
+            else status.HTTP_422_UNPROCESSABLE_ENTITY
+        )
+        raise HTTPException(
+            status_code=status_code,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
+    except (CargoPersistenceError, ForecastPersistenceError, ReferenceDataUnavailableError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "ERROR_COST_DATA_UNAVAILABLE", "message": "Cost data is unavailable"},
+        ) from exc
     except ValueError as exc:
         raise HTTPException(
-            status_code=400,
-            detail=str(exc),
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "ERROR_INVALID_COST_INPUT", "message": str(exc)},
         ) from exc

@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import List
 from uuid import UUID, uuid4
 from fastapi import HTTPException, status
-from app.repositories.cargo_repository import cargo_repository
+from app.repositories.cargo_repository import CargoPersistenceError, cargo_repository
 from app.repositories.port_repository import port_repository
 from app.schemas.audit import AuditAction, AuditEntityType
 from app.schemas.auth import UserProfileResponse
@@ -51,7 +51,13 @@ class CargoService:
         }
 
         # 4. Persist via repository
-        saved = cargo_repository.create(record)
+        try:
+            saved = cargo_repository.create(record)
+        except CargoPersistenceError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Cargo request could not be persisted",
+            ) from exc
 
         # 5. Record audit event
         try:
@@ -87,7 +93,13 @@ class CargoService:
     def get_cargo_request(
         self, cargo_request_id: UUID, user_profile: UserProfileResponse
     ) -> CargoRequestResponse:
-        record = cargo_repository.get_by_id(cargo_request_id)
+        try:
+            record = cargo_repository.get_by_id(cargo_request_id)
+        except CargoPersistenceError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Cargo request storage is unavailable",
+            ) from exc
         if not record:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -122,7 +134,13 @@ class CargoService:
     def list_cargo_requests(
         self, user_profile: UserProfileResponse
     ) -> List[CargoRequestResponse]:
-        records = cargo_repository.get_by_user_id(user_profile.user_id)
+        try:
+            records = cargo_repository.get_by_user_id(user_profile.user_id)
+        except CargoPersistenceError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Cargo request storage is unavailable",
+            ) from exc
         results = []
         for r in records:
             results.append(

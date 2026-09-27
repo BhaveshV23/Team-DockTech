@@ -3,6 +3,8 @@ import os
 import sys
 from uuid import uuid4
 
+import pytest
+
 # Ensure backend directory is in sys.path
 backend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend"))
 if backend_path not in sys.path:
@@ -12,6 +14,7 @@ from fastapi.testclient import TestClient
 import jwt
 from app.core.config import settings
 from app.repositories.cargo_repository import cargo_repository
+import app.repositories.cargo_repository as cargo_repository_module
 from app.repositories.user_repository import user_repository
 from main import app
 
@@ -19,6 +22,51 @@ TEST_JWT_SECRET = "docktech-test-jwt-secret-key-32-bytes-long"
 settings.SUPABASE_JWT_SECRET = TEST_JWT_SECRET
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def fake_supabase_cargo_table(monkeypatch):
+    """Exercise the Supabase REST repository boundary without a live database."""
+    rows = {}
+    state = {"fail_insert": False}
+
+    class FakeResponse:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    class FakeSupabaseClient:
+        def __init__(self, timeout=None):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, headers, json):
+            if state["fail_insert"]:
+                return FakeResponse(500, {"message": "database unavailable"})
+            rows[json["cargo_request_id"]] = dict(json)
+            return FakeResponse(201, [dict(json)])
+
+        def get(self, url, headers, params):
+            if "cargo_request_id" in params:
+                wanted = params["cargo_request_id"].removeprefix("eq.")
+                result = [rows[wanted]] if wanted in rows else []
+            else:
+                wanted_user = params["user_id"].removeprefix("eq.")
+                result = [row for row in rows.values() if row["user_id"] == wanted_user]
+            return FakeResponse(200, result)
+
+    monkeypatch.setattr(cargo_repository, "supabase_url", "https://docktech.test")
+    monkeypatch.setattr(cargo_repository, "service_role_key", "test-service-key")
+    monkeypatch.setattr(cargo_repository_module.httpx, "Client", FakeSupabaseClient)
+    return rows, state
 
 
 def helper_create_test_user(display_name: str = "Test User", role: str = "PLANNER"):
@@ -186,7 +234,6 @@ def test_valid_cargo_request_create_and_identity_derivation():
         assert data["destination_port_id"] == "PARADIP"
         assert data["contract_horizon"] == "SPOT"
     finally:
-        cargo_repository.clear_mock_requests()
         user_repository.clear_mock_profiles()
 
 
@@ -222,7 +269,6 @@ def test_retrieve_existing_cargo_request_success():
         assert retrieved_data["commodity"] == "COKING_COAL"
         assert retrieved_data["cargo_volume_mt"] == 120000.0
     finally:
-        cargo_repository.clear_mock_requests()
         user_repository.clear_mock_profiles()
 
 
@@ -257,7 +303,6 @@ def test_retrieve_unauthorized_cargo_request_returns_404():
         assert get_resp.status_code == 404
         assert "not found" in get_resp.json()["detail"].lower()
     finally:
-        cargo_repository.clear_mock_requests()
         user_repository.clear_mock_profiles()
 
 
@@ -272,5 +317,58 @@ def test_retrieve_nonexistent_cargo_request_returns_404():
         )
         assert response.status_code == 404
         assert "not found" in response.json()["detail"].lower()
+    finally:
+        user_repository.clear_mock_profiles()
+
+
+def test_cargo_request_create_confirms_supabase_persistence(fake_supabase_cargo_table):
+    rows, _ = fake_supabase_cargo_table
+    token, profile = helper_create_test_user()
+    payload = {
+        "commodity": "THERMAL_COAL",
+        "cargo_volume_mt": 75000.0,
+        "origin_port_id": "NEWCASTLE",
+        "destination_port_id": "PARADIP",
+        "earliest_delivery_date": "2026-10-01",
+        "latest_delivery_date": "2026-10-15",
+        "contract_horizon": "SPOT",
+    }
+    try:
+        response = client.post(
+            "/api/v1/cargo-requests",
+            headers={"Authorization": f"Bearer {token}"},
+            json=payload,
+        )
+        assert response.status_code == 201
+        saved = response.json()
+        assert saved["cargo_request_id"] in rows
+        assert rows[saved["cargo_request_id"]]["user_id"] == profile["user_id"]
+        assert saved["cargo_request_id"] == rows[saved["cargo_request_id"]]["cargo_request_id"]
+    finally:
+        user_repository.clear_mock_profiles()
+
+
+def test_cargo_request_persistence_failure_is_not_success(fake_supabase_cargo_table):
+    rows, state = fake_supabase_cargo_table
+    state["fail_insert"] = True
+    token, _ = helper_create_test_user()
+    payload = {
+        "commodity": "THERMAL_COAL",
+        "cargo_volume_mt": 75000.0,
+        "origin_port_id": "NEWCASTLE",
+        "destination_port_id": "PARADIP",
+        "earliest_delivery_date": "2026-10-01",
+        "latest_delivery_date": "2026-10-15",
+        "contract_horizon": "SPOT",
+    }
+    try:
+        response = client.post(
+            "/api/v1/cargo-requests",
+            headers={"Authorization": f"Bearer {token}"},
+            json=payload,
+        )
+        assert response.status_code == 503
+        assert response.json()["detail"] == "Cargo request could not be persisted"
+        assert rows == {}
     finally:
         user_repository.clear_mock_profiles()
