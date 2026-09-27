@@ -29,7 +29,7 @@
     hero.png should be the ship/port image visible
     in your reference design.
   */
-    background-image: url('../assets/hero.png');
+    background-image: url('../assets/hero.jpeg');
     background-size: cover;
     background-position: center;
 }
@@ -743,4 +743,11 @@
 
 .signup-link a:hover {
     text-decoration: underline;
+}
+
+.field-error {
+    color: #dc2626;
+    font-size: 10px;
+    line-height: 1.4;
+    margin-top: -2px;
 }

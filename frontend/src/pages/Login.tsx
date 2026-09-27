@@ -16,6 +16,46 @@ function Login() {
     const [showPassword, setShowPassword] = useState(false)
     const [rememberMe, setRememberMe] = useState(false)
 
+    const [email, setEmail] = useState("")
+    const [password, setPassword] = useState("")
+    const [role, setRole] = useState("")
+
+    const [errors, setErrors] = useState<{
+        email?: string
+        password?: string
+        role?: string
+    }>({})
+
+    const validateLogin = () => {
+        const newErrors: {
+            email?: string
+            password?: string
+            role?: string
+        } = {}
+
+        const trimmedEmail = email.trim()
+        const trimmedPassword = password.trim()
+
+        if (!trimmedEmail) {
+            newErrors.email = "Email is required."
+        } else if (
+            !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)
+        ) {
+            newErrors.email = "Enter a valid email address."
+        }
+
+        if (!trimmedPassword) {
+            newErrors.password = "Password is required."
+        }
+
+        if (!role) {
+            newErrors.role = "Please select your role."
+        }
+
+        setErrors(newErrors)
+
+        return Object.keys(newErrors).length === 0
+    }
     return (
         <main className="login-page">
 
@@ -117,7 +157,13 @@ function Login() {
 
                     <form
                         className="login-form"
-                        onSubmit={(event) => event.preventDefault()}
+                        onSubmit={(event) => {
+                            event.preventDefault()
+
+                            if (validateLogin()) {
+                                console.log("Login validation successful")
+                            }
+                        }}
                     >
 
                         {/* Email */}
@@ -133,7 +179,24 @@ function Login() {
                                 type="email"
                                 placeholder="you@example.com"
                                 autoComplete="email"
+                                value={email}
+                                onChange={(event) => {
+                                    setEmail(event.target.value)
+
+                                    if (errors.email) {
+                                        setErrors((current) => ({
+                                            ...current,
+                                            email: undefined,
+                                        }))
+                                    }
+                                }}
                             />
+
+                            {errors.email && (
+                                <span className="field-error">
+                                    {errors.email}
+                                </span>
+                            )}
 
                         </div>
 
@@ -150,9 +213,20 @@ function Login() {
                                 <input
                                     id="password"
                                     name="password"
-                                    type={showPassword ? 'text' : 'password'}
+                                    type={showPassword ? "text" : "password"}
                                     placeholder="Enter your password"
                                     autoComplete="current-password"
+                                    value={password}
+                                    onChange={(event) => {
+                                        setPassword(event.target.value)
+
+                                        if (errors.password) {
+                                            setErrors((current) => ({
+                                                ...current,
+                                                password: undefined,
+                                            }))
+                                        }
+                                    }}
                                 />
 
                                 <button
@@ -176,6 +250,13 @@ function Login() {
 
                             </div>
 
+                            {/* ADD THE ERROR HERE */}
+                            {errors.password && (
+                                <span className="field-error">
+                                    {errors.password}
+                                </span>
+                            )}
+
                         </div>
 
                         <div className="form-field">
@@ -186,7 +267,17 @@ function Login() {
                             <select
                                 id="role"
                                 name="role"
-                                defaultValue=""
+                                value={role}
+                                onChange={(event) => {
+                                    setRole(event.target.value)
+
+                                    if (errors.role) {
+                                        setErrors((current) => ({
+                                            ...current,
+                                            role: undefined,
+                                        }))
+                                    }
+                                }}
                             >
                                 <option value="" disabled>
                                     Select your role
@@ -197,6 +288,12 @@ function Login() {
                                 <option value="MANAGER">Manager</option>
                                 <option value="ADMINISTRATOR">Administrator</option>
                             </select>
+
+                            {errors.role && (
+                                <span className="field-error">
+                                    {errors.role}
+                                </span>
+                            )}
                         </div>
 
 

@@ -1,0 +1,387 @@
+/* =========================================================
+   DockTech Cargo Request
+   ========================================================= */
+
+.cargo-request-page {
+    min-height: 100vh;
+    display: flex;
+    background: #f5f7fa;
+    color: #172033;
+    font-family: Inter, "Segoe UI", Arial, sans-serif;
+}
+
+/* =========================================================
+   Main
+   ========================================================= */
+
+.cargo-request-main {
+    flex: 1;
+    min-width: 0;
+    padding: 30px 34px 45px;
+    overflow-x: hidden;
+}
+
+/* =========================================================
+   Back Link
+   ========================================================= */
+
+.cargo-back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 24px;
+    color: #66758a;
+    text-decoration: none;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.cargo-back-link:hover {
+    color: #146ef5;
+}
+
+/* =========================================================
+   Intro
+   ========================================================= */
+
+.cargo-request-intro {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 30px;
+    margin-bottom: 25px;
+}
+
+.cargo-eyebrow {
+    margin: 0 0 7px;
+    color: #146ef5;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+}
+
+.cargo-request-intro h1 {
+    margin: 0;
+    color: #172033;
+    font-size: 27px;
+    font-weight: 700;
+    letter-spacing: -0.6px;
+}
+
+.cargo-request-intro p {
+    max-width: 620px;
+    margin: 8px 0 0;
+    color: #69778a;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.cargo-step-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 11px;
+    background: #ffffff;
+    border: 1px solid #e1e7ef;
+    border-radius: 8px;
+    color: #69778a;
+    font-size: 10px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.cargo-step-active {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 25px;
+    height: 25px;
+    background: #146ef5;
+    color: #ffffff;
+    border-radius: 50%;
+    font-size: 9px;
+}
+
+/* =========================================================
+   Form Card
+   ========================================================= */
+
+.cargo-request-card {
+    background: #ffffff;
+    border: 1px solid #e1e7ef;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+/* =========================================================
+   Section Heading
+   ========================================================= */
+
+.cargo-section-heading {
+    padding: 21px 24px;
+    border-bottom: 1px solid #edf0f4;
+}
+
+.cargo-section-heading h2 {
+    margin: 0;
+    color: #172033;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.cargo-section-heading p {
+    margin: 5px 0 0;
+    color: #7b8798;
+    font-size: 11px;
+}
+
+/* =========================================================
+   Form Grid
+   ========================================================= */
+
+.cargo-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+    padding: 24px;
+}
+
+.cargo-field {
+    display: flex;
+    flex-direction: column;
+}
+
+.cargo-field label {
+    margin-bottom: 7px;
+    color: #344054;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.cargo-field label span {
+    color: #dc2626;
+}
+
+.cargo-field input,
+.cargo-field select {
+    width: 100%;
+    height: 42px;
+    box-sizing: border-box;
+    padding: 0 12px;
+    border: 1px solid #d7dee8;
+    border-radius: 7px;
+    outline: none;
+    background: #ffffff;
+    color: #172033;
+    font-family: inherit;
+    font-size: 11px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.cargo-field input::placeholder {
+    color: #a0aab8;
+}
+
+.cargo-field input:focus,
+.cargo-field select:focus {
+    border-color: #146ef5;
+    box-shadow: 0 0 0 3px rgba(20, 110, 245, 0.09);
+}
+
+.cargo-field select {
+    cursor: pointer;
+}
+
+/* =========================================================
+   Input With Unit
+   ========================================================= */
+
+.cargo-input-with-unit {
+    position: relative;
+}
+
+.cargo-input-with-unit input {
+    padding-right: 45px;
+}
+
+.cargo-input-with-unit span {
+    position: absolute;
+    top: 50%;
+    right: 12px;
+    transform: translateY(-50%);
+    color: #7b8798;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+/* =========================================================
+   Subsections
+   ========================================================= */
+
+.cargo-subsection {
+    padding: 22px 24px;
+    border-top: 1px solid #edf0f4;
+}
+
+.cargo-subsection-heading {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 2px;
+}
+
+.cargo-subsection-heading>svg {
+    margin-top: 2px;
+    color: #146ef5;
+}
+
+.cargo-subsection-heading h3 {
+    margin: 0;
+    color: #263246;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.cargo-subsection-heading p {
+    margin: 4px 0 0;
+    color: #7b8798;
+    font-size: 10px;
+}
+
+.cargo-subsection .cargo-form-grid {
+    padding: 20px 0 0;
+}
+
+.cargo-contract-field {
+    max-width: 500px;
+}
+
+.cargo-contract-field small {
+    margin-top: 6px;
+    color: #8a96a6;
+    font-size: 9px;
+}
+
+/* =========================================================
+   Error
+   ========================================================= */
+
+.cargo-form-error {
+    margin: 0 24px 20px;
+    padding: 10px 12px;
+    background: #fff5f5;
+    border: 1px solid #fecaca;
+    border-radius: 7px;
+    color: #b91c1c;
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+/* =========================================================
+   Form Actions
+   ========================================================= */
+
+.cargo-form-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 18px 24px;
+    background: #fafbfd;
+    border-top: 1px solid #edf0f4;
+}
+
+.cargo-cancel-button,
+.cargo-submit-button {
+    min-height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 0 15px;
+    border-radius: 7px;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.cargo-cancel-button {
+    border: 1px solid #d7dee8;
+    background: #ffffff;
+    color: #59677a;
+}
+
+.cargo-cancel-button:hover {
+    background: #f5f7fa;
+}
+
+.cargo-submit-button {
+    border: none;
+    background: #146ef5;
+    color: #ffffff;
+}
+
+.cargo-submit-button:hover {
+    background: #0d5dcc;
+}
+
+/* =========================================================
+   Responsive - Tablet
+   ========================================================= */
+
+@media (max-width: 760px) {
+
+    .cargo-request-main {
+        padding: 22px 16px 40px;
+    }
+
+    .cargo-request-intro {
+        flex-direction: column;
+        gap: 15px;
+    }
+
+    .cargo-form-grid {
+        grid-template-columns: 1fr;
+        padding: 20px;
+    }
+
+    .cargo-subsection {
+        padding: 20px;
+    }
+
+    .cargo-subsection .cargo-form-grid {
+        padding: 18px 0 0;
+    }
+
+    .cargo-form-error {
+        margin-left: 20px;
+        margin-right: 20px;
+    }
+
+    .cargo-form-actions {
+        padding: 16px 20px;
+    }
+}
+
+/* =========================================================
+   Responsive - Small Mobile
+   ========================================================= */
+
+@media (max-width: 480px) {
+    .cargo-request-intro h1 {
+        font-size: 23px;
+    }
+
+    .cargo-form-actions {
+        flex-direction: column-reverse;
+        align-items: stretch;
+    }
+
+    .cargo-cancel-button,
+    .cargo-submit-button {
+        width: 100%;
+    }
+}

@@ -1,0 +1,406 @@
+.scenarios-risk-page {
+    min-height: 100vh;
+    display: flex;
+    background: #f5f7fa;
+    color: #172033;
+    font-family: Inter, "Segoe UI", Arial, sans-serif;
+}
+
+.scenarios-risk-main {
+    flex: 1;
+    min-width: 0;
+    padding: 30px 34px 45px;
+    overflow-x: hidden;
+}
+
+/* Back */
+
+.scenarios-back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 24px;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.scenarios-back-link:hover {
+    color: #146ef5;
+}
+
+/* Header */
+
+.scenarios-page-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 28px;
+}
+
+.scenarios-eyebrow {
+    display: block;
+    margin-bottom: 7px;
+    color: #146ef5;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+}
+
+.scenarios-page-header h1 {
+    margin: 0;
+    color: #172033;
+    font-size: 27px;
+    line-height: 1.2;
+}
+
+.scenarios-page-header p {
+    margin: 8px 0 0;
+    color: #697386;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.scenarios-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 11px;
+    border: 1px solid #dfe5ed;
+    border-radius: 7px;
+    background: #ffffff;
+    color: #7b8494;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.scenarios-status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #94a3b8;
+}
+
+/* Section */
+
+.scenarios-section {
+    margin-bottom: 16px;
+}
+
+.scenarios-section-heading {
+    margin-bottom: 13px;
+}
+
+.scenarios-section-heading h2 {
+    margin: 0;
+    font-size: 16px;
+}
+
+.scenarios-section-heading p {
+    margin: 5px 0 0;
+    color: #7b8494;
+    font-size: 11px;
+}
+
+/* Scenario cards */
+
+.scenario-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 15px;
+}
+
+.scenario-card {
+    padding: 19px;
+    background: #ffffff;
+    border: 1px solid #e2e7ee;
+    border-radius: 10px;
+}
+
+.scenario-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 17px;
+}
+
+.scenario-icon {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: #edf4ff;
+    color: #146ef5;
+}
+
+.scenario-label {
+    color: #7b8494;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+}
+
+.scenario-card h3 {
+    margin: 0;
+    color: #172033;
+    font-size: 14px;
+}
+
+.scenario-card>p {
+    min-height: 35px;
+    margin: 6px 0 17px;
+    color: #7b8494;
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.scenario-metrics {
+    border-top: 1px solid #edf0f4;
+}
+
+.scenario-metrics>div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 0;
+    border-bottom: 1px solid #edf0f4;
+}
+
+.scenario-metrics>div:last-child {
+    border-bottom: 0;
+}
+
+.scenario-metrics span {
+    color: #697386;
+    font-size: 10px;
+}
+
+.scenario-metrics strong {
+    color: #172033;
+    font-size: 11px;
+}
+
+/* Risk */
+
+.risk-overview-card {
+    margin-bottom: 16px;
+    overflow: hidden;
+    background: #ffffff;
+    border: 1px solid #e2e7ee;
+    border-radius: 10px;
+}
+
+.risk-overview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 15px;
+    padding: 20px;
+    border-bottom: 1px solid #edf0f4;
+}
+
+.risk-overview-title {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    color: #146ef5;
+}
+
+.risk-overview-title h2 {
+    margin: 0;
+    color: #172033;
+    font-size: 15px;
+}
+
+.risk-overview-title p {
+    margin: 4px 0 0;
+    color: #7b8494;
+    font-size: 11px;
+}
+
+.risk-level {
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: #f4f6f9;
+    color: #697386;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.risk-empty-state {
+    min-height: 220px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    padding: 35px 25px;
+    text-align: center;
+}
+
+.risk-empty-icon {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 13px;
+    border-radius: 11px;
+    background: #edf4ff;
+    color: #146ef5;
+}
+
+.risk-empty-state h3 {
+    margin: 0;
+    color: #172033;
+    font-size: 15px;
+}
+
+.risk-empty-state p {
+    max-width: 620px;
+    margin: 8px 0 0;
+    color: #7b8494;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+/* Information */
+
+.scenarios-information-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+}
+
+.scenarios-information-card {
+    padding: 19px;
+    background: #ffffff;
+    border: 1px solid #e2e7ee;
+    border-radius: 10px;
+}
+
+.scenarios-information-title {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 14px;
+    color: #146ef5;
+}
+
+.scenarios-information-title h2 {
+    margin: 0;
+    color: #172033;
+    font-size: 14px;
+}
+
+.scenarios-information-card p {
+    margin: 0;
+    color: #697386;
+    font-size: 12px;
+    line-height: 1.7;
+}
+
+/* Responsive */
+
+@media (max-width: 900px) {
+    .scenario-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .scenarios-information-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 760px) {
+    .scenarios-risk-main {
+        padding: 24px 18px 36px;
+    }
+
+    .scenarios-page-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .scenarios-page-header h1 {
+        font-size: 23px;
+    }
+
+    .scenarios-status {
+        align-self: flex-start;
+    }
+
+    .risk-overview-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}
+
+.scenarios-request-card {
+    display: flex;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 20px;
+    margin-bottom: 20px;
+    border: 1px solid #d9e2ec;
+    border-radius: 12px;
+    background: #ffffff;
+}
+
+.scenarios-request-label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: #64748b;
+}
+
+.scenarios-request-card h2 {
+    margin: 0;
+    font-size: 20px;
+    text-transform: capitalize;
+}
+
+.scenarios-request-details {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(120px, 1fr));
+    gap: 20px;
+}
+
+.scenarios-request-details span,
+.scenarios-request-details strong {
+    display: block;
+}
+
+.scenarios-request-details span {
+    margin-bottom: 5px;
+    font-size: 12px;
+    color: #64748b;
+}
+
+.scenarios-request-details strong {
+    font-size: 14px;
+    color: #334155;
+}
+
+@media (max-width: 900px) {
+    .scenarios-request-card {
+        flex-direction: column;
+    }
+
+    .scenarios-request-details {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 600px) {
+    .scenarios-request-details {
+        grid-template-columns: 1fr;
+    }
+}

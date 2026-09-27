@@ -1,0 +1,438 @@
+/* =========================================================
+   DockTech Decision Overview
+   ========================================================= */
+
+.decision-overview-page {
+    min-height: 100vh;
+    display: flex;
+    background: #f5f7fa;
+    color: #172033;
+    font-family: Inter, "Segoe UI", Arial, sans-serif;
+}
+
+/* =========================================================
+   Sidebar
+   ========================================================= */
+
+/* =========================================================
+   Main
+   ========================================================= */
+
+.decision-main {
+    flex: 1;
+    min-width: 0;
+    padding: 30px 34px 45px;
+    overflow-x: hidden;
+}
+
+/* =========================================================
+   Header
+   ========================================================= */
+
+.decision-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 25px;
+}
+
+.decision-eyebrow {
+    margin: 0 0 6px;
+    color: #146ef5;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+}
+
+.decision-header h1 {
+    margin: 0;
+    font-size: 27px;
+    font-weight: 700;
+    letter-spacing: -0.6px;
+}
+
+.decision-subtitle {
+    max-width: 620px;
+    margin: 8px 0 0;
+    color: #69778a;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.decision-new-request {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 37px;
+    padding: 0 15px;
+    background: #146ef5;
+    color: #ffffff;
+    border-radius: 7px;
+    text-decoration: none;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.decision-new-request:hover {
+    background: #0d5dcc;
+}
+
+/* =========================================================
+   Active Request
+   ========================================================= */
+
+.decision-request-card {
+    margin-bottom: 18px;
+    background: #ffffff;
+    border: 1px solid #e1e7ef;
+    border-radius: 11px;
+    overflow: hidden;
+}
+
+.decision-request-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 18px 21px;
+    border-bottom: 1px solid #edf0f4;
+}
+
+.decision-request-heading span {
+    color: #146ef5;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.7px;
+}
+
+.decision-request-heading h2 {
+    margin: 4px 0 0;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.decision-request-heading a {
+    color: #146ef5;
+    font-size: 10px;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.decision-request-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.decision-request-grid>div {
+    padding: 16px 19px;
+    border-right: 1px solid #edf0f4;
+}
+
+.decision-request-grid>div:last-child {
+    border-right: none;
+}
+
+.decision-request-grid span {
+    display: block;
+    color: #7b8798;
+    font-size: 9px;
+    font-weight: 600;
+}
+
+.decision-request-grid strong {
+    display: block;
+    margin-top: 5px;
+    color: #273449;
+    font-size: 11px;
+}
+
+/* =========================================================
+   Summary Cards
+   ========================================================= */
+
+.decision-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+    margin-bottom: 18px;
+}
+
+.decision-summary-card {
+    position: relative;
+    padding: 17px;
+    background: #ffffff;
+    border: 1px solid #e1e7ef;
+    border-radius: 10px;
+}
+
+.decision-summary-icon {
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 11px;
+    background: #eaf2ff;
+    color: #146ef5;
+    border-radius: 8px;
+}
+
+.decision-summary-card>span {
+    display: block;
+    color: #69778a;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.decision-summary-card>strong {
+    display: block;
+    margin-top: 5px;
+    color: #172033;
+    font-size: 20px;
+}
+
+.decision-summary-card>small {
+    display: block;
+    margin-top: 4px;
+    color: #8a96a6;
+    font-size: 8px;
+}
+
+/* =========================================================
+   Content Grid
+   ========================================================= */
+
+.decision-content-grid {
+    display: grid;
+    grid-template-columns: 1.6fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.decision-panel {
+    min-width: 0;
+    background: #ffffff;
+    border: 1px solid #e1e7ef;
+    border-radius: 11px;
+    overflow: hidden;
+}
+
+.decision-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 15px;
+    padding: 17px 19px;
+    border-bottom: 1px solid #edf0f4;
+}
+
+.decision-panel-header span {
+    display: block;
+    color: #146ef5;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.7px;
+}
+
+.decision-panel-header h2 {
+    margin: 4px 0 0;
+    color: #273449;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.decision-panel-header>svg {
+    color: #7b8798;
+}
+
+/* =========================================================
+   Empty States
+   ========================================================= */
+
+.decision-empty-state {
+    min-height: 250px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 30px 25px;
+    text-align: center;
+}
+
+.decision-empty-state.compact {
+    min-height: 180px;
+}
+
+.decision-empty-state>svg {
+    margin-bottom: 13px;
+    color: #146ef5;
+    opacity: 0.65;
+}
+
+.decision-empty-state h3 {
+    margin: 0;
+    color: #344054;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.decision-empty-state p {
+    max-width: 400px;
+    margin: 7px 0 0;
+    color: #7b8798;
+    font-size: 10px;
+    line-height: 1.6;
+}
+
+/* =========================================================
+   Scenarios
+   ========================================================= */
+
+.decision-scenarios {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    padding: 19px;
+}
+
+.decision-scenarios>div {
+    padding: 15px 12px;
+    background: #f8fafc;
+    border: 1px solid #edf0f4;
+    border-radius: 8px;
+}
+
+.decision-scenarios span {
+    display: block;
+    color: #7b8798;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+.decision-scenarios strong {
+    display: block;
+    margin-top: 9px;
+    color: #273449;
+    font-size: 17px;
+}
+
+/* =========================================================
+   Assumptions
+   ========================================================= */
+
+.assumptions-panel {
+    margin-bottom: 10px;
+}
+
+.decision-assumptions-empty {
+    padding: 17px 20px;
+}
+
+.decision-assumptions-empty p {
+    margin: 0;
+    color: #7b8798;
+    font-size: 10px;
+    line-height: 1.6;
+}
+
+/* =========================================================
+   Responsive - Tablet
+   ========================================================= */
+
+@media (max-width: 1100px) {
+    .decision-sidebar {
+        width: 215px;
+    }
+
+    .decision-main {
+        padding: 26px;
+    }
+
+    .decision-summary-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .decision-request-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .decision-request-grid>div:nth-child(3) {
+        border-right: none;
+    }
+}
+
+/* =========================================================
+   Responsive - Mobile
+   ========================================================= */
+
+@media (max-width: 760px) {
+    .decision-overview-page {
+        flex-direction: column;
+    }
+
+    .decision-sidebar {
+        width: 100%;
+        min-height: auto;
+    }
+
+    .decision-brand {
+        padding: 15px 18px;
+    }
+
+    .decision-nav {
+        flex-direction: row;
+        overflow-x: auto;
+        padding: 9px 11px;
+    }
+
+    .decision-nav-item {
+        flex-shrink: 0;
+        padding: 9px 10px;
+    }
+
+    .decision-sidebar-footer {
+        display: none;
+    }
+
+    .decision-main {
+        padding: 20px 16px 35px;
+    }
+
+    .decision-header {
+        flex-direction: column;
+    }
+
+    .decision-new-request {
+        width: 100%;
+    }
+
+    .decision-request-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .decision-request-grid>div {
+        border-right: none;
+        border-bottom: 1px solid #edf0f4;
+    }
+
+    .decision-summary-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .decision-content-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 480px) {
+    .decision-request-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .decision-scenarios {
+        grid-template-columns: 1fr;
+    }
+}
