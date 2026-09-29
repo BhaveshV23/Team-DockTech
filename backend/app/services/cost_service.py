@@ -28,7 +28,7 @@ from uuid import UUID
 from backend.app.domain.cost.engine import calculate_cost
 from backend.app.domain.cost.errors import CostDomainError
 from backend.app.domain.cost.models import CostInputs, CostResult, FreightUnit
-from backend.app.domain.cost.resolver import CostInputResolver
+from backend.app.domain.cost.resolver import CostInputResolver, ResolvedCostContext
 from backend.app.repositories.forecast_repository import forecast_repository
 from backend.app.repositories.reference_repository import ReferenceRepositoryProtocol
 from backend.app.schemas.auth import UserProfileResponse
@@ -120,12 +120,36 @@ class CostEngineService:
         )
 
         # Step 2: Execute pure Cost Engine (C3) → CostResult
-        result: CostResult = calculate_cost(
-            inputs=cost_inputs,
-            cost_reference_date=cost_reference_date,
-        )
+        return self.calculate_resolved(cost_inputs, cost_reference_date)
 
-        return result
+    def calculate_with_context(
+        self,
+        cargo_volume_mt: Decimal,
+        origin_port_id: str,
+        destination_port_id: str,
+        commodity: str,
+        vessel_class_id: str,
+        freight_unit: FreightUnit | str,
+        cost_reference_date: datetime.date,
+        freight_rate_override: Optional[Decimal] = None,
+    ) -> tuple[CostResult, ResolvedCostContext]:
+        """Calculate cost and retain the resolved records for Scenario reuse."""
+        context = self._resolver.resolve_cost_context(
+            cargo_volume_mt=cargo_volume_mt,
+            origin_port_id=origin_port_id,
+            destination_port_id=destination_port_id,
+            commodity=commodity,
+            vessel_class_id=vessel_class_id,
+            freight_unit=freight_unit,
+            cost_reference_date=cost_reference_date,
+            freight_rate_override=freight_rate_override,
+        )
+        return self.calculate_resolved(context.cost_inputs, cost_reference_date), context
+
+    @staticmethod
+    def calculate_resolved(inputs: CostInputs, cost_reference_date: datetime.date) -> CostResult:
+        """Run the unchanged pure cost engine over already-resolved inputs."""
+        return calculate_cost(inputs=inputs, cost_reference_date=cost_reference_date)
 
 
 class CostContextError(CostDomainError):

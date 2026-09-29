@@ -139,6 +139,35 @@ class TestCostEngineServiceEndToEnd:
 
         assert result_1 == result_2
 
+    def test_shared_reference_context_preserves_cost_result_and_selected_records(
+        self, reference_repo: CSVReferenceRepository, cost_service: CostEngineService
+    ):
+        kwargs = dict(
+            cargo_volume_mt=CARGO_VOLUME,
+            origin_port_id=ORIGIN,
+            destination_port_id=DESTINATION,
+            commodity=COMMODITY,
+            vessel_class_id=VESSEL_CLASS,
+            freight_unit="USD_PER_MT",
+            cost_reference_date=REF_DATE,
+            freight_rate_override=Decimal("18.50"),
+        )
+        baseline = cost_service.calculate(**kwargs)
+        shared_result, context = cost_service.calculate_with_context(**kwargs)
+
+        assert shared_result == baseline
+        assert context.cost_inputs.origin_handling_rate_tpd == reference_repo.get_compatible_berth_handling_rate(
+            ORIGIN, COMMODITY, reference_repo.get_vessel_class(VESSEL_CLASS)
+        )
+        assert context.cost_inputs.dest_handling_rate_tpd == reference_repo.get_compatible_berth_handling_rate(
+            DESTINATION, COMMODITY, reference_repo.get_vessel_class(VESSEL_CLASS)
+        )
+        assert context.origin_berth.handling_rate_tpd == float(context.cost_inputs.origin_handling_rate_tpd)
+        assert context.destination_berth.handling_rate_tpd == float(context.cost_inputs.dest_handling_rate_tpd)
+        assert context.cost_inputs.vlsfo_price_usd_per_mt == reference_repo.get_latest_vlsfo_price(REF_DATE)
+        assert context.cost_inputs.origin_waiting_hours == reference_repo.get_latest_port_waiting_hours(ORIGIN, REF_DATE)
+        assert context.cost_inputs.dest_waiting_hours == reference_repo.get_latest_port_waiting_hours(DESTINATION, REF_DATE)
+
 
 # ==============================================================================
 # 2. FORECAST FREIGHT RATE OVERRIDE

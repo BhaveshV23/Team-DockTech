@@ -23,6 +23,7 @@ from backend.app.domain.entities import (
     VesselClass,
 )
 from backend.app.domain.cost.models import FreightUnit
+from backend.app.domain.cost.resolver import ResolvedCostContext
 from backend.app.domain.scenario import (
     ScenarioComparison,
     ScenarioEngine,
@@ -74,27 +75,55 @@ class ScenarioService:
         return cls(repository=ScenarioRepository(), reference_repository=SupabaseCostReferenceRepository())
 
     def resolve_decision_inputs(
-        self, cargo_request_id: UUID, forecast_run_id: UUID, user_profile: UserProfileResponse
+        self,
+        cargo_request_id: UUID,
+        forecast_run_id: UUID,
+        user_profile: UserProfileResponse,
+        *,
+        forecast_run: Optional[dict] = None,
+        forecast_points: Optional[list[dict]] = None,
+        cost_context: Optional[ResolvedCostContext] = None,
     ) -> DecisionInputs:
         """Build domain inputs only from owner-checked persisted application records."""
         cargo = self.cargo_access_service.get_cargo_request(cargo_request_id, user_profile)
         try:
-            forecast = self.forecast_repo.get_forecast_run(forecast_run_id)
+            if (forecast_run is None) != (forecast_points is None):
+                raise ScenarioContextError("Forecast run and points must be supplied together")
+            if forecast_run is None:
+                forecast = self.forecast_repo.get_forecast_run(forecast_run_id)
+            else:
+                forecast = forecast_run
+                points = forecast_points
             if forecast is None:
                 raise ScenarioContextError("Forecast run not found", "ERROR_FORECAST_RUN_NOT_FOUND", 404)
+            if forecast_run is not None and str(forecast.get("forecast_run_id")) != str(forecast_run_id):
+                raise ScenarioContextError("Forecast run does not match the requested forecast run")
             if str(forecast.get("cargo_request_id")) != str(cargo_request_id):
                 raise ScenarioContextError("Forecast run does not belong to the cargo request")
-            route_record = self.reference_repository.get_route(
-                origin_port_id=cargo.origin_port_id,
-                destination_port_id=cargo.destination_port_id,
-                commodity=cargo.commodity,
-            )
+            if cost_context is None:
+                route_record = self.reference_repository.get_route(
+                    origin_port_id=cargo.origin_port_id,
+                    destination_port_id=cargo.destination_port_id,
+                    commodity=cargo.commodity,
+                )
+            else:
+                route_record = cost_context.route
+                if (route_record.origin_port_id, route_record.destination_port_id, route_record.commodity) != (
+                    cargo.origin_port_id, cargo.destination_port_id, cargo.commodity
+                ):
+                    raise ScenarioContextError("Resolved route does not match the cargo request")
             if forecast.get("route_id") != route_record.route_id:
                 raise ScenarioContextError("Forecast route does not match the cargo request")
-            vessel_record = self.reference_repository.get_vessel_class(forecast["vessel_class_id"])
+            if cost_context is None:
+                vessel_record = self.reference_repository.get_vessel_class(forecast["vessel_class_id"])
+            else:
+                vessel_record = cost_context.vessel_class
+                if vessel_record.vessel_class_id != forecast["vessel_class_id"]:
+                    raise ScenarioContextError("Resolved vessel does not match the forecast run")
             freight_unit = FreightUnit.from_str(forecast["freight_unit"])
             reference_date = datetime.date.fromisoformat(str(forecast["training_data_end_date"]))
-            points = self.forecast_repo.get_forecast_points(forecast_run_id)
+            if forecast_run is None:
+                points = self.forecast_repo.get_forecast_points(forecast_run_id)
             if not points:
                 raise ScenarioContextError("Forecast run has no persisted forecast points", "ERROR_FORECAST_POINTS_NOT_FOUND")
             if any(
@@ -110,19 +139,47 @@ class ScenarioService:
                  / Decimal(str(point["central_value"])) * Decimal("100"))
                 for point in points
             )
-            origin_berth_record = self.reference_repository.get_compatible_berth(
-                cargo.origin_port_id, cargo.commodity, vessel_record
-            )
-            destination_berth_record = self.reference_repository.get_compatible_berth(
-                cargo.destination_port_id, cargo.commodity, vessel_record
-            )
-            origin_waiting = self.reference_repository.get_latest_port_waiting_hours(
-                cargo.origin_port_id, reference_date
-            )
-            destination_waiting = self.reference_repository.get_latest_port_waiting_hours(
-                cargo.destination_port_id, reference_date
-            )
-            fuel_price = self.reference_repository.get_latest_vlsfo_price(reference_date)
+            if cost_context is None:
+                origin_berth_record = self.reference_repository.get_compatible_berth(
+                    cargo.origin_port_id, cargo.commodity, vessel_record
+                )
+                destination_berth_record = self.reference_repository.get_compatible_berth(
+                    cargo.destination_port_id, cargo.commodity, vessel_record
+                )
+                origin_waiting = self.reference_repository.get_latest_port_waiting_hours(
+                    cargo.origin_port_id, reference_date
+                )
+                destination_waiting = self.reference_repository.get_latest_port_waiting_hours(
+                    cargo.destination_port_id, reference_date
+                )
+                fuel_price = self.reference_repository.get_latest_vlsfo_price(reference_date)
+            else:
+                if cost_context.cost_reference_date != reference_date:
+                    raise ScenarioContextError("Cost reference date does not match the forecast run")
+                cost_inputs = cost_context.cost_inputs
+                if cost_inputs.cargo_volume_mt != Decimal(str(cargo.cargo_volume_mt)):
+                    raise ScenarioContextError("Resolved cost volume does not match the cargo request")
+                if cost_inputs.freight_unit.value != freight_unit.value:
+                    raise ScenarioContextError("Resolved freight unit does not match the forecast run")
+                if cost_inputs.freight_rate_value != freight_rate:
+                    raise ScenarioContextError("Resolved freight rate does not match the forecast points")
+                if (
+                    cost_inputs.distance_nm != Decimal(str(route_record.distance_nm))
+                    or cost_inputs.vessel_cargo_capacity_mt != Decimal(str(vessel_record.cargo_capacity_mt))
+                ):
+                    raise ScenarioContextError("Resolved cost inputs do not match the route or vessel")
+                origin_berth_record = cost_context.origin_berth
+                destination_berth_record = cost_context.destination_berth
+                if (
+                    origin_berth_record.port_id != cargo.origin_port_id
+                    or destination_berth_record.port_id != cargo.destination_port_id
+                    or origin_berth_record.commodity != cargo.commodity
+                    or destination_berth_record.commodity != cargo.commodity
+                ):
+                    raise ScenarioContextError("Resolved berths do not match the cargo route")
+                origin_waiting = cost_inputs.origin_waiting_hours
+                destination_waiting = cost_inputs.dest_waiting_hours
+                fuel_price = cost_inputs.vlsfo_price_usd_per_mt
         except (ForecastPersistenceError, ReferenceDataUnavailableError) as exc:
             raise ScenarioStorageUnavailable(str(exc)) from exc
         except ScenarioContextError:
@@ -176,8 +233,18 @@ class ScenarioService:
             cost_reference_date=reference_date, forecast_spread_pct=float(spread_pct),
         )
 
-    def run_canonical_for_cargo(self, cargo_request_id, forecast_run_id, user_profile):
-        inputs = self.resolve_decision_inputs(cargo_request_id, forecast_run_id, user_profile)
+    def run_canonical_for_cargo(
+        self, cargo_request_id, forecast_run_id, user_profile, *, forecast_run=None, forecast_points=None,
+        cost_context=None,
+    ):
+        inputs = self.resolve_decision_inputs(
+            cargo_request_id,
+            forecast_run_id,
+            user_profile,
+            forecast_run=forecast_run,
+            forecast_points=forecast_points,
+            cost_context=cost_context,
+        )
         return self.run_scenarios(inputs, persist=True)
 
     def evaluate_canonical_for_cargo(self, cargo_request_id, forecast_run_id, user_profile, shock):

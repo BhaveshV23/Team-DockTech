@@ -2,10 +2,14 @@ import {
     AlertTriangle,
     BarChart3,
     FileText,
+    LogOut,
     Ship,
     TrendingUp,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { getRoleLabel, signOut, useAuthenticatedUser } from "../services/api";
 import "./Sidebar.css";
 
 type SidebarProps = {
@@ -22,6 +26,20 @@ type SidebarProps = {
 };
 
 function Sidebar({ activePage }: SidebarProps) {
+    const navigate = useNavigate();
+    const [signOutError, setSignOutError] = useState("");
+    const user = useAuthenticatedUser();
+
+    const handleSignOut = async () => {
+        setSignOutError("");
+        try {
+            await signOut();
+            navigate("/login", { replace: true });
+        } catch (error) {
+            setSignOutError(error instanceof Error ? error.message : "Unable to sign out.");
+        }
+    };
+
     return (
         <aside className="app-sidebar">
             <div className="app-sidebar-brand">
@@ -116,11 +134,29 @@ function Sidebar({ activePage }: SidebarProps) {
                     <FileText size={18} />
                     <span>Decision Report</span>
                 </Link>
+
+                <button
+                    type="button"
+                    className="app-sidebar-item"
+                    onClick={handleSignOut}
+                    style={{ width: "100%", border: 0, background: "transparent", color: "inherit", textAlign: "left", cursor: "pointer", font: "inherit" }}
+                >
+                    <LogOut size={18} />
+                    <span>Sign out</span>
+                </button>
             </nav>
 
             <div className="app-sidebar-footer">
                 <span>DockTech v1.0</span>
+                {signOutError && <span role="alert">{signOutError}</span>}
             </div>
+
+            {user && (
+                <div className="app-sidebar-profile" aria-label="Signed-in user">
+                    <strong>{user.name}</strong>
+                    <span>{getRoleLabel(user.role)}</span>
+                </div>
+            )}
         </aside>
     );
 }

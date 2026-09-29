@@ -197,6 +197,35 @@
     font-size: 10px;
 }
 
+.cost-operational-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.cost-operational-item {
+    padding: 10px 12px;
+    border: 1px solid #e2e7ee;
+    border-radius: 8px;
+    background: #ffffff;
+}
+
+.cost-operational-item span,
+.cost-operational-item strong {
+    display: block;
+}
+
+.cost-operational-item span {
+    color: #697386;
+    font-size: 10px;
+}
+
+.cost-operational-item strong {
+    margin-top: 4px;
+    color: #172033;
+    font-size: 13px;
+}
+
 /* Comparison */
 
 .cost-comparison-card {
@@ -336,6 +365,10 @@
         grid-template-columns: 1fr;
     }
 
+    .cost-operational-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
     .cost-information-grid {
         grid-template-columns: 1fr;
     }
@@ -362,6 +395,12 @@
     .cost-card-header {
         align-items: flex-start;
         flex-direction: column;
+    }
+}
+
+@media (max-width: 480px) {
+    .cost-operational-grid {
+        grid-template-columns: 1fr;
     }
 }
 

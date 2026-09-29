@@ -130,3 +130,80 @@
         display: none;
     }
 }
+
+.app-sidebar-profile {
+    display: grid;
+    gap: 3px;
+    padding: 12px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.app-sidebar-profile strong {
+    overflow: hidden;
+    color: #ffffff;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.app-sidebar-profile span {
+    color: #aebdd1;
+    font-size: 10px;
+}
+
+/* Keep desktop navigation stationary while each page main scrolls independently. */
+@media (min-width: 761px) {
+    .app-sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: 100vh;
+        min-height: 0;
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        z-index: 1000;
+    }
+
+    .app-sidebar + main {
+        height: 100vh;
+        min-height: 0;
+        margin-left: 250px;
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+}
+
+/* Preserve the compact horizontal sidebar at mobile widths and scroll the main pane. */
+@media (max-width: 760px) {
+    *:has(> aside.app-sidebar) {
+        height: 100vh;
+        min-height: 0;
+        overflow: hidden;
+        flex-direction: column;
+    }
+
+    .app-sidebar {
+        position: relative;
+        top: auto;
+        left: auto;
+        width: 100%;
+        height: auto;
+        min-height: 0;
+        max-height: 45vh;
+        overflow-x: hidden;
+        overflow-y: auto;
+    }
+
+    .app-sidebar + main {
+        width: 100%;
+        height: auto;
+        min-height: 0;
+        flex: 1 1 0;
+        margin-left: 0;
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+}

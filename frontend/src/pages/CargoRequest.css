@@ -163,6 +163,17 @@
     color: #dc2626;
 }
 
+.cargo-field-error {
+    margin-top: 5px;
+    color: #b91c1c;
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+.cargo-field [aria-invalid="true"] {
+    border-color: #dc2626;
+}
+
 .cargo-field input,
 .cargo-field select {
     width: 100%;
@@ -278,6 +289,18 @@
     line-height: 1.4;
 }
 
+.cargo-form-error button {
+    margin-left: 10px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #146ef5;
+    font: inherit;
+    font-weight: 700;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
 /* =========================================================
    Form Actions
    ========================================================= */
@@ -326,6 +349,11 @@
 
 .cargo-submit-button:hover {
     background: #0d5dcc;
+}
+
+.cargo-submit-button:disabled {
+    background: #9bbcf0;
+    cursor: not-allowed;
 }
 
 /* =========================================================

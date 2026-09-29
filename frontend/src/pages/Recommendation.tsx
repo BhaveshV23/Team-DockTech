@@ -9,10 +9,66 @@ import {
 import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import { useCargoRequest } from "../hooks/useCargoRequest";
+import { useAuthenticatedUser } from "../services/api";
+import { getStoredRecommendation } from "../services/recommendation";
 import "./Recommendation.css";
+
+type PageStatus = "success" | "error";
+
+function isUuid(value: string | undefined): value is string {
+    return Boolean(value && /^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(value));
+}
+
+function formatUsd(value: number | string): string {
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue)
+        ? new Intl.NumberFormat("en-US", {
+            style: "currency",
+            currency: "USD",
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        }).format(numericValue)
+        : "--";
+}
+
+function formatHours(value: number | string): string {
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) ? `${numericValue.toFixed(2)} h` : "--";
+}
+
+function formatAssumptions(value: string): string[] {
+    const ratePattern = /([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s+(USD_PER_MT|USD_PER_DAY)/g;
+    const formatted = value.replace(ratePattern, (_match, amount: string, unit: string) => {
+        const displayUnit = unit === "USD_PER_MT" ? "/ MT" : "/ day";
+        return `${formatUsd(amount)} ${displayUnit}`;
+    });
+    return formatted.split(/(?<=[.;])\s+/).map((assumption) => assumption.trim()).filter(Boolean);
+}
+
+function formatTimestamp(value: string): string {
+    const timestamp = new Date(value);
+    return Number.isNaN(timestamp.getTime()) ? value : timestamp.toLocaleString();
+}
 
 function Recommendation() {
     const cargoRequest = useCargoRequest();
+    const user = useAuthenticatedUser();
+    const cargoRequestId = cargoRequest?.cargo_request_id;
+    const hasValidCargoRequestId = isUuid(cargoRequestId);
+    const userId = user?.user_id;
+    const recommendation = hasValidCargoRequestId && userId
+        ? getStoredRecommendation(userId, cargoRequestId)
+        : null;
+    const status: PageStatus = recommendation
+        ? "success"
+        : "error";
+    const errorMessage = !hasValidCargoRequestId
+        ? "No valid saved cargo request was found. Create a cargo request before viewing its recommendation."
+        : "No recommendation is stored for this cargo in the current workflow. Open Decision Overview to load the decision, then return here.";
+
+    const displayedValue = (value: string | undefined) => {
+        return status === "success" ? value ?? "--" : "--";
+    };
 
     return (
         <div className="recommendation-page">
@@ -45,7 +101,9 @@ function Recommendation() {
 
                     <div className="recommendation-status">
                         <span className="recommendation-status-dot"></span>
-                        Awaiting data
+                        {status === "success"
+                            ? "Recommendation ready"
+                            : "Recommendation unavailable"}
                     </div>
                 </header>
 
@@ -68,7 +126,7 @@ function Recommendation() {
                             <span>Volume</span>
                             <strong>
                                 {cargoRequest
-                                    ? `${cargoRequest.cargoVolume} MT`
+                                    ? `${cargoRequest.cargoVolume.toLocaleString("en-US", { maximumFractionDigits: 2 })} MT`
                                     : "--"}
                             </strong>
                         </div>
@@ -111,16 +169,18 @@ function Recommendation() {
                     <div className="recommendation-result-content">
                         <span>Recommended Action</span>
 
-                        <h2>--</h2>
+                        <h2>{displayedValue(recommendation?.market_entry_action)}</h2>
 
-                        <p>
-                            The backend decision engine recommendation will
-                            appear here after the cargo request is processed.
-                        </p>
+                        {status === "success" && recommendation ? (
+                            <div className="recommendation-vessel">
+                                <span>Recommended Vessel</span>
+                                <strong>{recommendation.recommended_vessel_class_id}</strong>
+                            </div>
+                        ) : <p>No recommendation result is available.</p>}
                     </div>
 
                     <span className="recommendation-confidence">
-                        Confidence: --
+                        Confidence: {displayedValue(recommendation?.confidence)}
                     </span>
                 </section>
 
@@ -128,28 +188,16 @@ function Recommendation() {
                 <section className="recommendation-strategy-grid">
                     <div className="recommendation-strategy-card">
                         <div className="recommendation-card-icon">
-                            <Target size={19} />
-                        </div>
-
-                        <span>Market Entry</span>
-
-                        <strong>--</strong>
-
-                        <small>FIX_NOW / WAIT</small>
-                    </div>
-
-                    <div className="recommendation-strategy-card">
-                        <div className="recommendation-card-icon">
                             <ShieldCheck size={19} />
                         </div>
 
                         <span>Contract Strategy</span>
 
-                        <strong>--</strong>
+                        <strong>
+                            {displayedValue(recommendation?.contract_strategy?.replace(/_/g, " "))}
+                        </strong>
 
-                        <small>
-                            SPOT / SHORT TERM / MULTIPLE VOYAGE
-                        </small>
+                        <small>Backend-selected strategy</small>
                     </div>
 
                     <div className="recommendation-strategy-card">
@@ -159,7 +207,11 @@ function Recommendation() {
 
                         <span>Expected Freight</span>
 
-                        <strong>--</strong>
+                        <strong>
+                            {status === "success" && recommendation
+                                ? formatUsd(recommendation.expected_freight_cost)
+                                : displayedValue(undefined)}
+                        </strong>
 
                         <small>Backend-generated value</small>
                     </div>
@@ -171,7 +223,7 @@ function Recommendation() {
 
                         <span>Risk</span>
 
-                        <strong>--</strong>
+                        <strong>{displayedValue(recommendation?.risk_level)}</strong>
 
                         <small>Backend-generated assessment</small>
                     </div>
@@ -193,22 +245,30 @@ function Recommendation() {
                     <div className="recommendation-metrics-grid">
                         <div>
                             <span>Total Cost</span>
-                            <strong>--</strong>
+                            <strong>
+                                {status === "success" && recommendation
+                                    ? formatUsd(recommendation.expected_total_cost)
+                                    : displayedValue(undefined)}
+                            </strong>
                         </div>
 
                         <div>
                             <span>Turnaround</span>
-                            <strong>--</strong>
+                            <strong>
+                                {status === "success" && recommendation
+                                    ? formatHours(recommendation.estimated_turnaround_hours)
+                                    : displayedValue(undefined)}
+                            </strong>
                         </div>
 
                         <div>
                             <span>Confidence</span>
-                            <strong>--</strong>
+                            <strong>{displayedValue(recommendation?.confidence)}</strong>
                         </div>
 
                         <div>
                             <span>Risk Level</span>
-                            <strong>--</strong>
+                            <strong>{displayedValue(recommendation?.risk_level)}</strong>
                         </div>
                     </div>
                 </section>
@@ -230,19 +290,23 @@ function Recommendation() {
                         </div>
                     </div>
 
-                    <div className="recommendation-empty-state">
-                        <div className="recommendation-empty-icon">
-                            <Info size={24} />
-                        </div>
+                    <div className={`recommendation-empty-state ${status === "success" ? "recommendation-rationale-ready" : ""}`} aria-live="polite">
+                        {status === "error" && <div className="recommendation-empty-icon"><AlertTriangle size={24} /></div>}
 
-                        <h3>No recommendation available</h3>
-
-                        <p>
-                            Once the decision engine processes the cargo
-                            request, its rationale, supporting factors,
-                            assumptions, and limitations will be displayed
-                            here.
-                        </p>
+                        {status === "success" && recommendation ? (
+                            <>
+                                <h3>Backend rationale</h3>
+                                <p className="recommendation-rationale-text">{recommendation.rationale}</p>
+                            </>
+                        ) : (
+                            <>
+                                <h3>Recommendation unavailable</h3>
+                                <p role="alert">{errorMessage}</p>
+                                <Link to={hasValidCargoRequestId ? "/decision-overview" : "/cargo-request"}>
+                                    {hasValidCargoRequestId ? "Open Decision Overview" : "Go to Cargo Request"}
+                                </Link>
+                            </>
+                        )}
                     </div>
                 </section>
 
@@ -254,13 +318,14 @@ function Recommendation() {
                             <h2>Assumptions</h2>
                         </div>
 
-                        <p>
-                            Backend-provided assumptions and decision
-                            limitations will appear here.
-                        </p>
+                        <ul className="recommendation-assumptions-list">
+                            {status === "success" && recommendation
+                                ? formatAssumptions(recommendation.assumptions).map((assumption, index) => <li key={`${index}-${assumption}`}>{assumption}</li>)
+                                : <li>No assumptions are available.</li>}
+                        </ul>
                     </div>
 
-                    <div className="recommendation-information-card">
+                    <div className="recommendation-information-card recommendation-data-status">
                         <div className="recommendation-information-title">
                             <AlertTriangle size={18} />
                             <h2>Data Status</h2>
@@ -268,13 +333,32 @@ function Recommendation() {
 
                         <div className="recommendation-info-row">
                             <span>Decision status</span>
-                            <strong>Awaiting data</strong>
+                            <strong>
+                                {status === "success" ? "Complete" : "Unavailable"}
+                            </strong>
                         </div>
 
                         <div className="recommendation-info-row">
                             <span>Last updated</span>
-                            <strong>--</strong>
+                            <strong>
+                                {status === "success" && recommendation
+                                    ? formatTimestamp(recommendation.created_at)
+                                    : "--"}
+                            </strong>
                         </div>
+
+                        {status === "success" && recommendation && (
+                            <>
+                                <div className="recommendation-info-row">
+                                    <span>Recommendation ID</span>
+                                    <strong title={recommendation.recommendation_id}>{recommendation.recommendation_id}</strong>
+                                </div>
+                                <div className="recommendation-info-row">
+                                    <span>Forecast Run ID</span>
+                                    <strong title={recommendation.forecast_run_id}>{recommendation.forecast_run_id}</strong>
+                                </div>
+                            </>
+                        )}
                     </div>
                 </section>
             </main>

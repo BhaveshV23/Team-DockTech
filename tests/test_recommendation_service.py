@@ -114,6 +114,7 @@ class Forecasts:
         self.missing_for = set(missing_for)
         self.mismatch_for = mismatch_for
         self.calls = []
+        self.results_by_vessel = {}
 
     def create_forecast(self, **kwargs):
         self.calls.append(kwargs)
@@ -129,7 +130,7 @@ class Forecasts:
             "freight_unit": kwargs["freight_unit"],
             "training_data_end_date": "2025-12-31",
         }
-        return {
+        result = {
             "forecast_run": run,
             # Deliberately descending; service normalizes to chronological order.
             "forecast_points": [
@@ -151,6 +152,8 @@ class Forecasts:
                 },
             ],
         }
+        self.results_by_vessel[vessel_id] = result
+        return result
 
 
 class Costs:
@@ -175,6 +178,15 @@ class Costs:
             required_voyages=(2 if kwargs["vessel_class_id"] == "V1" else 1),
         )
 
+    def calculate_with_context(self, **kwargs):
+        result = self.calculate(**kwargs)
+        context = SimpleNamespace(
+            vessel_class_id=kwargs["vessel_class_id"],
+            cost_reference_date=kwargs["cost_reference_date"],
+            freight_rate=kwargs["freight_rate_override"],
+        )
+        return result, context
+
 
 class Scenarios:
     def __init__(self, *, missing=False, mismatch=False):
@@ -182,8 +194,10 @@ class Scenarios:
         self.mismatch = mismatch
         self.calls = []
 
-    def run_canonical_for_cargo(self, cargo_id, forecast_run_id, user_profile):
-        self.calls.append((cargo_id, forecast_run_id, user_profile))
+    def run_canonical_for_cargo(
+        self, cargo_id, forecast_run_id, user_profile, *, forecast_run, forecast_points, cost_context
+    ):
+        self.calls.append((cargo_id, forecast_run_id, user_profile, forecast_run, forecast_points, cost_context))
         if self.missing:
             return None
         results = [
@@ -307,14 +321,23 @@ def test_successful_orchestration_resolves_inputs_and_returns_engine_result(user
     assert result.confidence == RecommendationConfidence.HIGH
     assert len(feasibility.calls) == 1
     assert len(forecasts.calls) == len(costs.calls) == len(scenarios.calls) == 2
+    assert [call["vessel_class_id"] for call in forecasts.calls] == ["V1", "V2"]
     assert all(call["freight_rate_override"] == Decimal("10") for call in costs.calls)
+    for cargo_id, run_id, profile, supplied_run, supplied_points, context in scenarios.calls:
+        vessel_id = supplied_run["vessel_class_id"]
+        created = forecasts.results_by_vessel[vessel_id]
+        assert (cargo_id, run_id, profile) == (uid(1), UUID(created["forecast_run"]["forecast_run_id"]), user_profile)
+        assert supplied_run == created["forecast_run"]
+        assert supplied_points == created["forecast_points"]
+        assert context.vessel_class_id == vessel_id
+        assert context.freight_rate == Decimal("10")
 
 
-def test_infeasible_candidate_is_forecast_but_excluded_from_cost_and_scenarios(user_profile):
+def test_infeasible_candidate_skips_forecast_cost_and_scenarios(user_profile):
     service, _, forecasts, costs, scenarios = make_service(rejected={"V1"})
     result = recommend(service, user_profile)
     assert result.recommended_vessel_class_id == "V2"
-    assert [call["vessel_class_id"] for call in forecasts.calls] == ["V1", "V2"]
+    assert [call["vessel_class_id"] for call in forecasts.calls] == ["V2"]
     assert [call["vessel_class_id"] for call in costs.calls] == ["V2"]
     assert len(scenarios.calls) == 1
 
@@ -342,7 +365,7 @@ def test_no_eligible_vessel_fails_without_cost_or_scenarios(user_profile):
     service, _, forecasts, costs, scenarios = make_service(rejected={"V1", "V2"})
     with pytest.raises(NoFeasibleVesselError):
         recommend(service, user_profile)
-    assert len(forecasts.calls) == 2
+    assert not forecasts.calls
     assert not costs.calls
     assert not scenarios.calls
 

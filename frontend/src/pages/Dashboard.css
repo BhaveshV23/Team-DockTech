@@ -78,6 +78,85 @@
     transform: translateY(-1px);
 }
 
+.dashboard-profile-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    margin: 0 0 30px;
+    padding: 18px 22px;
+    background: #ffffff;
+    border: 1px solid #dce7f8;
+    border-left: 4px solid #146ef5;
+    border-radius: 10px;
+}
+
+.dashboard-profile-card .dashboard-eyebrow {
+    margin-bottom: 5px;
+}
+
+.dashboard-profile-card h2 {
+    margin: 0;
+    color: #172033;
+    font-size: 18px;
+}
+
+.dashboard-profile-card p {
+    margin: 5px 0 0;
+    color: #697386;
+    font-size: 12px;
+}
+
+.dashboard-profile-role {
+    max-width: 390px;
+}
+
+.dashboard-profile-role strong {
+    color: #172033;
+    font-size: 13px;
+}
+
+.dashboard-request-state {
+    display: flex;
+    align-items: flex-start;
+    gap: 13px;
+    padding: 20px;
+    border: 1px solid #e2e7ee;
+    border-radius: 10px;
+    background: #ffffff;
+    color: #64748b;
+}
+
+.dashboard-request-state strong {
+    color: #172033;
+    font-size: 14px;
+}
+
+.dashboard-request-state p {
+    margin: 6px 0 12px;
+    color: #697386;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.dashboard-request-error {
+    color: #b42318;
+}
+
+.dashboard-retry-button {
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.dashboard-spinner {
+    flex-shrink: 0;
+    animation: dashboard-spin 1s linear infinite;
+}
+
+@keyframes dashboard-spin {
+    to { transform: rotate(360deg); }
+}
+
 /* =========================
    Sections
 ========================= */
@@ -327,6 +406,12 @@
         align-items: flex-start;
         flex-direction: column;
         margin-bottom: 28px;
+    }
+
+    .dashboard-profile-card {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 12px;
     }
 
     .dashboard-header h1 {

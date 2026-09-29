@@ -135,6 +135,11 @@ class RecommendationService:
                 raise InconsistentRecommendationEvidenceError(
                     f"Contradictory feasibility result for {vessel.vessel_class_id}"
                 )
+            # Infeasible candidates are retained in result_by_vessel for
+            # validation, but do not need forecast, cost, or scenario evidence.
+            if not marked_feasible:
+                continue
+
             forecast_result = self.forecast_service.create_forecast(
                 cargo_request_id=cargo_request_id,
                 route_id=route.route_id,
@@ -150,12 +155,8 @@ class RecommendationService:
                 vessel_class_id=vessel.vessel_class_id,
                 freight_unit=cost_unit,
             )
-            # Every candidate gets a candidate-specific forecast. Feasibility
-            # gates the more expensive cost and scenario calculations below.
-            if not marked_feasible:
-                continue
             expected_rate = points[0].central_value
-            cost_result = self.cost_engine.calculate(
+            cost_result, cost_context = self.cost_engine.calculate_with_context(
                 cargo_volume_mt=cargo_volume_mt,
                 origin_port_id=cargo.origin_port_id,
                 destination_port_id=cargo.destination_port_id,
@@ -177,7 +178,12 @@ class RecommendationService:
             )
 
             scenario_set = self.scenario_service.run_canonical_for_cargo(
-                cargo_request_id, run.forecast_run_id, user_profile
+                cargo_request_id,
+                run.forecast_run_id,
+                user_profile,
+                forecast_run=forecast_result["forecast_run"],
+                forecast_points=forecast_result["forecast_points"],
+                cost_context=cost_context,
             )
             scenario_evidence = self._scenario_evidence(
                 scenario_set,

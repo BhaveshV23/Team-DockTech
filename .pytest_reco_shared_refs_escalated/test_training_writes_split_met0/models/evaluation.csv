@@ -1,0 +1,3 @@
+route_id,vessel_class_id,freight_unit,model,mae,rmse,mape_pct,directional_accuracy_pct
+ROUTE,VESSEL,USD_PER_MT,seasonal_naive_7d,0.06999999999999999,0.06999999999999999,0.2595915672047837,100.0
+ROUTE,VESSEL,USD_PER_MT,ridge_autoregression,0.00014645012424888742,0.00020276106899073216,0.000541741714526896,100.0

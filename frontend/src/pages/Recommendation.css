@@ -132,6 +132,25 @@
     line-height: 1.5;
 }
 
+.recommendation-vessel {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.recommendation-vessel span {
+    color: #697386;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.recommendation-vessel strong {
+    color: #172033;
+    font-size: 16px;
+    letter-spacing: 0.02em;
+}
+
 .recommendation-confidence {
     flex-shrink: 0;
     padding: 7px 10px;
@@ -146,7 +165,7 @@
 
 .recommendation-strategy-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 15px;
     margin-bottom: 16px;
 }
@@ -304,6 +323,26 @@
     line-height: 1.6;
 }
 
+.recommendation-empty-state .recommendation-rationale-text {
+    width: min(100%, 760px);
+    max-width: 760px;
+    color: #334155;
+    font-size: 13px;
+    line-height: 1.75;
+    text-align: left;
+}
+
+.recommendation-empty-state.recommendation-rationale-ready {
+    min-height: 0;
+    align-items: flex-start;
+    padding: 18px 22px;
+    text-align: left;
+}
+
+.recommendation-rationale-ready h3 {
+    margin-top: 0;
+}
+
 /* Information */
 
 .recommendation-information-grid {
@@ -340,6 +379,18 @@
     line-height: 1.7;
 }
 
+.recommendation-assumptions-list {
+    margin: 0;
+    padding-left: 18px;
+    color: #697386;
+    font-size: 12px;
+    line-height: 1.65;
+}
+
+.recommendation-assumptions-list li + li {
+    margin-top: 7px;
+}
+
 .recommendation-info-row {
     display: flex;
     align-items: center;
@@ -357,6 +408,35 @@
 .recommendation-info-row strong {
     color: #172033;
     font-size: 11px;
+}
+
+.recommendation-data-status {
+    align-self: start;
+    padding: 14px;
+    background: #fbfcfe;
+}
+
+.recommendation-data-status .recommendation-information-title {
+    margin-bottom: 8px;
+}
+
+.recommendation-data-status .recommendation-info-row {
+    align-items: flex-start;
+    gap: 10px;
+    padding: 7px 0;
+}
+
+.recommendation-data-status .recommendation-info-row span {
+    flex: 0 0 auto;
+    font-size: 10px;
+}
+
+.recommendation-data-status .recommendation-info-row strong {
+    min-width: 0;
+    max-width: 68%;
+    overflow-wrap: anywhere;
+    text-align: right;
+    font-size: 10px;
 }
 
 /* Responsive */

@@ -243,7 +243,7 @@ class RecommendationRepository:
             with httpx.Client(timeout=10.0) as client:
                 response = client.post(url, headers=headers, json=record)
             self._check_response(response, "persistence")
-            return self._verify_inserted(response.json(), record)
+            return self._verify_inserted(response.json(parse_float=Decimal), record)
         except RecommendationPersistenceError:
             raise
         except Exception as exc:

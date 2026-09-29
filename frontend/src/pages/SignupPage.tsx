@@ -3,13 +3,15 @@ import type { FormEvent } from "react";
 import {
     Anchor,
     BarChart3,
-    CheckCircle2,
     Eye,
     EyeOff,
     ShieldCheck,
     Ship,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import { apiRequest, getAuthConfigurationError, setAuthenticatedProfile, supabase } from "../services/api";
+import type { AuthProfile } from "../services/api";
 
 import "./Login.css";
 
@@ -22,7 +24,10 @@ function SignupPage() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
-    const [role, setRole] = useState("");
+    const [loading, setLoading] = useState(false);
+    const [serverError, setServerError] = useState("");
+    const [notice, setNotice] = useState("");
+    const navigate = useNavigate();
 
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] =
@@ -33,7 +38,6 @@ function SignupPage() {
         email?: string;
         password?: string;
         confirmPassword?: string;
-        role?: string;
     }>({});
 
 
@@ -47,14 +51,12 @@ function SignupPage() {
             email?: string;
             password?: string;
             confirmPassword?: string;
-            role?: string;
         } = {};
 
         const trimmedFullName = fullName.trim();
         const trimmedEmail = email.trim();
-        const trimmedPassword = password.trim();
-        const trimmedConfirmPassword =
-            confirmPassword.trim();
+        const trimmedPassword = password;
+        const trimmedConfirmPassword = confirmPassword;
 
 
         // Full Name
@@ -115,13 +117,6 @@ function SignupPage() {
         }
 
 
-        // Role
-        if (!role) {
-            newErrors.role =
-                "Please select your role.";
-        }
-
-
         setErrors(newErrors);
 
         return Object.keys(newErrors).length === 0;
@@ -132,15 +127,41 @@ function SignupPage() {
     // FORM SUBMIT
     // =========================================
 
-    const handleSubmit = (
+    const handleSubmit = async (
         event: FormEvent<HTMLFormElement>
     ) => {
         event.preventDefault();
+        setServerError("");
+        setNotice("");
+        if (!validateSignup()) return;
+        if (!supabase) {
+            setServerError(getAuthConfigurationError() ?? "Authentication is unavailable.");
+            return;
+        }
 
-        if (validateSignup()) {
-            console.log(
-                "Signup validation successful"
-            );
+        setLoading(true);
+        try {
+            const { data, error } = await supabase.auth.signUp({
+                email: email.trim(),
+                password,
+                options: { data: { display_name: fullName.trim() } },
+            });
+            if (error) throw new Error(error.message);
+            if (!data.session) {
+                setNotice("Account created. Confirm your email before signing in. DockTech access also requires an application profile provisioned by an administrator.");
+                return;
+            }
+
+            const profile = await apiRequest<AuthProfile>("/api/v1/auth/me", {
+                headers: { Authorization: `Bearer ${data.session.access_token}` },
+            });
+            setAuthenticatedProfile(profile);
+            navigate("/dashboard", { replace: true });
+        } catch (error) {
+            await supabase.auth.signOut();
+            setServerError(error instanceof Error ? error.message : "Unable to create your account.");
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -493,105 +514,19 @@ function SignupPage() {
                         </div>
 
 
-                        {/* Role */}
-                        <div className="form-field">
-
-                            <label htmlFor="signup-role">
-                                Role
-                            </label>
-
-                            <select
-                                id="signup-role"
-                                name="role"
-                                value={role}
-                                onChange={(event) => {
-                                    setRole(
-                                        event.target.value
-                                    );
-
-                                    if (errors.role) {
-                                        setErrors((current) => ({
-                                            ...current,
-                                            role: undefined,
-                                        }));
-                                    }
-                                }}
-                                required
-                            >
-
-                                <option
-                                    value=""
-                                    disabled
-                                >
-                                    Select your role
-                                </option>
-
-                                <option value="VIEWER">
-                                    Viewer
-                                </option>
-
-                                <option value="PLANNER">
-                                    Planner
-                                </option>
-
-                                <option value="MANAGER">
-                                    Manager
-                                </option>
-
-                                <option value="ADMINISTRATOR">
-                                    Administrator
-                                </option>
-
-                            </select>
-
-                            {errors.role && (
-                                <span className="field-error">
-                                    {errors.role}
-                                </span>
-                            )}
-
-                        </div>
-
-
                         {/* Create Account */}
                         <button
                             type="submit"
                             className="login-button"
+                            disabled={loading}
                         >
-                            Create Account
+                            {loading ? "Creating Account…" : "Create Account"}
                         </button>
 
+                        {serverError && <div className="field-error" role="alert">{serverError}</div>}
+                        {notice && <div role="status" aria-live="polite">{notice}</div>}
+
                     </form>
-
-
-                    {/* Divider */}
-                    <div className="login-divider">
-
-                        <span />
-
-                        <small>or</small>
-
-                        <span />
-
-                    </div>
-
-
-                    {/* SSO */}
-                    <button
-                        type="button"
-                        className="sso-button"
-                    >
-
-                        <CheckCircle2
-                            size={17}
-                            strokeWidth={2}
-                        />
-
-                        <span>
-                            Sign up with SSO (Supabase)
-                        </span>
-
-                    </button>
 
 
                     {/* Login Link */}

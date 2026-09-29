@@ -1,6 +1,7 @@
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
+import json
 from uuid import UUID
 
 import pytest
@@ -48,7 +49,9 @@ class Response:
         self.status_code = status_code
         self.payload = payload
 
-    def json(self):
+    def json(self, **kwargs):
+        if isinstance(self.payload, str):
+            return json.loads(self.payload, **kwargs)
         return self.payload
 
 
@@ -146,6 +149,38 @@ def test_successful_persistence_posts_every_frozen_field(configured_repository):
         "created_at": "2026-02-03T04:05:06.123456+00:00",
     }
     assert saved == payload
+
+
+def test_insert_response_preserves_high_precision_numeric_values(configured_repository):
+    repo, state = configured_repository
+    precise_result = replace(
+        recommendation(),
+        expected_freight_cost=Decimal("12345678901234567890.1234567890123456789"),
+        expected_total_cost=Decimal("98765432109876543210.9876543210987654321"),
+        estimated_turnaround_hours=Decimal("73.1234567890123456789"),
+    )
+    record = repo._record(precise_result)
+    decimal_fields = {
+        "expected_freight_cost",
+        "expected_total_cost",
+        "estimated_turnaround_hours",
+    }
+    encoded_fields = []
+    for field, value in record.items():
+        encoded_value = value if field in decimal_fields else json.dumps(value)
+        encoded_fields.append(f"{json.dumps(field)}:{encoded_value}")
+    # PostgREST returns PostgreSQL NUMERIC values as unquoted JSON numbers.
+    response_body = "[{" + ",".join(encoded_fields) + ',"integer_probe":7}]'
+    state["insert_response"] = response_body
+
+    saved = repo.create(precise_result)
+
+    assert isinstance(saved["expected_freight_cost"], Decimal)
+    assert saved["expected_freight_cost"] == precise_result.expected_freight_cost
+    assert saved["expected_total_cost"] == precise_result.expected_total_cost
+    assert saved["estimated_turnaround_hours"] == precise_result.estimated_turnaround_hours
+    assert saved["integer_probe"] == 7
+    assert isinstance(saved["integer_probe"], int)
 
 
 @pytest.mark.parametrize(

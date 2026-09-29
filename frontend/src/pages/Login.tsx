@@ -1,9 +1,9 @@
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState } from 'react'
+import type { FormEvent } from "react";
 import {
     Anchor,
     BarChart3,
-    CheckCircle2,
     Eye,
     EyeOff,
     ShieldCheck,
@@ -11,30 +11,33 @@ import {
 } from 'lucide-react'
 
 import './Login.css'
+import { apiRequest, getAuthConfigurationError, setAuthenticatedProfile, setRememberSession, supabase } from "../services/api";
+import type { AuthProfile } from "../services/api";
 
 function Login() {
     const [showPassword, setShowPassword] = useState(false)
     const [rememberMe, setRememberMe] = useState(false)
+    const [loading, setLoading] = useState(false)
+    const [serverError, setServerError] = useState("")
+    const [notice, setNotice] = useState("")
+    const navigate = useNavigate()
+    const location = useLocation()
 
     const [email, setEmail] = useState("")
     const [password, setPassword] = useState("")
-    const [role, setRole] = useState("")
 
     const [errors, setErrors] = useState<{
         email?: string
         password?: string
-        role?: string
     }>({})
 
     const validateLogin = () => {
         const newErrors: {
             email?: string
             password?: string
-            role?: string
         } = {}
 
         const trimmedEmail = email.trim()
-        const trimmedPassword = password.trim()
 
         if (!trimmedEmail) {
             newErrors.email = "Email is required."
@@ -44,17 +47,47 @@ function Login() {
             newErrors.email = "Enter a valid email address."
         }
 
-        if (!trimmedPassword) {
+        if (!password) {
             newErrors.password = "Password is required."
-        }
-
-        if (!role) {
-            newErrors.role = "Please select your role."
         }
 
         setErrors(newErrors)
 
         return Object.keys(newErrors).length === 0
+    }
+
+    const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault()
+        setServerError("")
+        setNotice("")
+        if (!validateLogin()) return
+        if (!supabase) {
+            setServerError(getAuthConfigurationError() ?? "Authentication is unavailable.")
+            return
+        }
+
+        setLoading(true)
+        setRememberSession(rememberMe)
+        try {
+            const { data, error } = await supabase.auth.signInWithPassword({
+                email: email.trim(),
+                password,
+            })
+            if (error) throw new Error(error.message)
+            if (!data.session) throw new Error("Supabase did not return an authenticated session.")
+
+            const profile = await apiRequest<AuthProfile>("/api/v1/auth/me", {
+                headers: { Authorization: `Bearer ${data.session.access_token}` },
+            })
+            setAuthenticatedProfile(profile)
+            const target = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname;
+            navigate(target && target !== "/login" ? target : "/dashboard", { replace: true })
+        } catch (error) {
+            await supabase.auth.signOut()
+            setServerError(error instanceof Error ? error.message : "Unable to sign in.")
+        } finally {
+            setLoading(false)
+        }
     }
     return (
         <main className="login-page">
@@ -155,16 +188,7 @@ function Login() {
                     </div>
 
 
-                    <form
-                        className="login-form"
-                        onSubmit={(event) => {
-                            event.preventDefault()
-
-                            if (validateLogin()) {
-                                console.log("Login validation successful")
-                            }
-                        }}
-                    >
+                    <form className="login-form" onSubmit={handleLogin}>
 
                         {/* Email */}
                         <div className="form-field">
@@ -259,44 +283,6 @@ function Login() {
 
                         </div>
 
-                        <div className="form-field">
-                            <label htmlFor="role">
-                                Role
-                            </label>
-
-                            <select
-                                id="role"
-                                name="role"
-                                value={role}
-                                onChange={(event) => {
-                                    setRole(event.target.value)
-
-                                    if (errors.role) {
-                                        setErrors((current) => ({
-                                            ...current,
-                                            role: undefined,
-                                        }))
-                                    }
-                                }}
-                            >
-                                <option value="" disabled>
-                                    Select your role
-                                </option>
-
-                                <option value="VIEWER">Viewer</option>
-                                <option value="PLANNER">Planner</option>
-                                <option value="MANAGER">Manager</option>
-                                <option value="ADMINISTRATOR">Administrator</option>
-                            </select>
-
-                            {errors.role && (
-                                <span className="field-error">
-                                    {errors.role}
-                                </span>
-                            )}
-                        </div>
-
-
                         {/* Remember / Forgot */}
                         <div className="login-options">
 
@@ -317,6 +303,24 @@ function Login() {
                             <button
                                 type="button"
                                 className="forgot-password"
+                                onClick={async () => {
+                                    setServerError("")
+                                    setNotice("")
+                                    if (!email.trim()) {
+                                        setServerError("Enter your email address first to reset your password.")
+                                        return
+                                    }
+                                    if (!supabase) {
+                                        setServerError(getAuthConfigurationError() ?? "Authentication is unavailable.")
+                                        return
+                                    }
+                                    setLoading(true)
+                                    const { error } = await supabase.auth.resetPasswordForEmail(email.trim())
+                                    setLoading(false)
+                                    if (error) setServerError(error.message)
+                                    else setNotice("If this account exists, a password reset email has been sent.")
+                                }}
+                                disabled={loading}
                             >
                                 Forgot password?
                             </button>
@@ -328,41 +332,16 @@ function Login() {
                         <button
                             type="submit"
                             className="login-button"
+                            disabled={loading}
                         >
-                            Sign In
+                            {loading ? "Signing In…" : "Sign In"}
                         </button>
+
+                        {serverError && <div className="field-error" role="alert">{serverError}</div>}
+                        {notice && <div role="status" aria-live="polite">{notice}</div>}
 
                     </form>
 
-
-                    {/* Divider */}
-                    <div className="login-divider">
-
-                        <span />
-
-                        <small>or</small>
-
-                        <span />
-
-                    </div>
-
-
-                    {/* SSO */}
-                    <button
-                        type="button"
-                        className="sso-button"
-                    >
-
-                        <CheckCircle2
-                            size={17}
-                            strokeWidth={2}
-                        />
-
-                        <span>
-                            Sign in with SSO (Supabase)
-                        </span>
-
-                    </button>
 
                     <div className="signup-link">
                         Don't have an account?{" "}

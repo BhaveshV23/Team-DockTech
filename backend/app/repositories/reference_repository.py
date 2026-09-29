@@ -160,6 +160,11 @@ class ReferenceRepositoryProtocol(Protocol):
     ) -> Decimal:
         ...
 
+    def get_compatible_berth(
+        self, port_id: str, commodity: str, vessel_class: VesselClassRecord
+    ) -> BerthRecord:
+        ...
+
     def get_latest_vlsfo_price(
         self,
         cost_reference_date: datetime.date,
@@ -549,6 +554,24 @@ class CSVReferenceRepository:
             berth.handling_rate_tpd
             for berth in compatible_berths
         )
+
+    def get_compatible_berth(
+        self, port_id: str, commodity: str, vessel_class: VesselClassRecord
+    ) -> BerthRecord:
+        key = (port_id.strip(), commodity.strip())
+        berths = self._berths_by_port_comm.get(key, [])
+        compatible = [
+            berth for berth in berths
+            if berth.max_loa_m >= vessel_class.loa_m
+            and berth.max_beam_m >= vessel_class.beam_m
+            and berth.max_draft_m >= vessel_class.draft_m
+        ]
+        if not compatible:
+            raise InsufficientFeasibilityDataError(
+                f"Port '{port_id}' has no compatible berth for vessel class '{vessel_class.vessel_class_id}' "
+                f"handling commodity '{commodity}'."
+            )
+        return max(compatible, key=lambda berth: berth.handling_rate_tpd)
 
     def get_latest_vlsfo_price(
         self,

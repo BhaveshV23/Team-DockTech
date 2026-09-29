@@ -269,42 +269,6 @@
     line-height: 1.6;
 }
 
-/* Information */
-
-.scenarios-information-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 15px;
-}
-
-.scenarios-information-card {
-    padding: 19px;
-    background: #ffffff;
-    border: 1px solid #e2e7ee;
-    border-radius: 10px;
-}
-
-.scenarios-information-title {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    margin-bottom: 14px;
-    color: #146ef5;
-}
-
-.scenarios-information-title h2 {
-    margin: 0;
-    color: #172033;
-    font-size: 14px;
-}
-
-.scenarios-information-card p {
-    margin: 0;
-    color: #697386;
-    font-size: 12px;
-    line-height: 1.7;
-}
-
 /* Responsive */
 
 @media (max-width: 900px) {
@@ -312,9 +276,6 @@
         grid-template-columns: 1fr;
     }
 
-    .scenarios-information-grid {
-        grid-template-columns: 1fr;
-    }
 }
 
 @media (max-width: 760px) {
@@ -367,6 +328,19 @@
     text-transform: capitalize;
 }
 
+.scenarios-provenance {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-top: 8px;
+}
+
+.scenarios-provenance small {
+    color: #929baa;
+    font-size: 9px;
+    overflow-wrap: anywhere;
+}
+
 .scenarios-request-details {
     display: grid;
     grid-template-columns: repeat(4, minmax(120px, 1fr));
@@ -401,6 +375,213 @@
 
 @media (max-width: 600px) {
     .scenarios-request-details {
+        grid-template-columns: 1fr;
+    }
+}
+
+.scenarios-page-state {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 20px;
+    margin-bottom: 16px;
+    border: 1px solid #e2e7ee;
+    border-radius: 10px;
+    background: #fff;
+    color: #64748b;
+}
+
+.scenarios-page-state h2 {
+    margin: 0 0 5px;
+    color: #172033;
+    font-size: 15px;
+}
+
+.scenarios-page-state p {
+    margin: 0 0 10px;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.scenarios-page-state a {
+    color: #146ef5;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.scenarios-error,
+.scenarios-inline-error {
+    color: #b42318;
+}
+
+.scenarios-submit-button,
+.scenarios-inline-error button {
+    padding: 9px 13px;
+    border: 1px solid #146ef5;
+    border-radius: 7px;
+    background: #146ef5;
+    color: #fff;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.scenarios-submit-button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.scenarios-spinner {
+    animation: scenarios-spin 1s linear infinite;
+}
+
+@keyframes scenarios-spin {
+    to { transform: rotate(360deg); }
+}
+
+.scenarios-custom-card {
+    padding: 20px;
+    margin-bottom: 16px;
+    border: 1px solid #e2e7ee;
+    border-radius: 10px;
+    background: #fff;
+}
+
+.scenarios-custom-controls {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.scenarios-custom-controls label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.scenarios-custom-controls input,
+.scenarios-custom-controls select {
+    min-width: 145px;
+    padding: 9px 10px;
+    border: 1px solid #d8dee7;
+    border-radius: 7px;
+    background: #fff;
+    color: #172033;
+    font: inherit;
+    font-size: 12px;
+}
+
+.scenarios-inline-state,
+.scenarios-inline-error {
+    margin: 16px 0 0;
+    font-size: 12px;
+}
+
+.scenarios-inline-error p {
+    margin: 0 0 8px;
+}
+
+.scenarios-custom-result {
+    padding: 15px;
+    margin-top: 18px;
+    border: 1px solid #dbeafe;
+    border-radius: 8px;
+    background: #f8fbff;
+}
+
+.scenarios-custom-result h3 {
+    margin: 0 0 12px;
+    font-size: 14px;
+}
+
+.scenarios-delta-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.scenarios-delta-grid > div {
+    padding: 12px;
+    border: 1px solid #edf0f4;
+    border-radius: 7px;
+}
+
+.scenarios-delta-grid span,
+.scenarios-delta-grid strong {
+    display: block;
+}
+
+.scenarios-delta-grid span {
+    color: #697386;
+    font-size: 10px;
+}
+
+.scenarios-delta-grid strong {
+    margin-top: 5px;
+    color: #172033;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+.scenario-cost-details {
+    padding-top: 12px;
+    margin-top: 10px;
+    border-top: 1px solid #edf0f4;
+}
+
+.scenario-cost-details summary {
+    color: #146ef5;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.scenario-cost-details dl {
+    margin: 8px 0 0;
+}
+
+.scenario-cost-details dl > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 7px 0;
+    border-bottom: 1px solid #edf0f4;
+    font-size: 10px;
+}
+
+.scenario-cost-details dt {
+    color: #697386;
+}
+
+.scenario-cost-details dd {
+    margin: 0;
+    color: #172033;
+    text-align: right;
+}
+
+@media (max-width: 900px) {
+    .scenarios-custom-controls {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .scenarios-custom-controls input,
+    .scenarios-custom-controls select {
+        width: 100%;
+    }
+
+    .scenarios-delta-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 560px) {
+    .scenarios-delta-grid {
         grid-template-columns: 1fr;
     }
 }
