@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AlertCircle, AlertTriangle, ArrowLeft, BarChart3, CheckCircle2, Download, FileText, Info, Ship, TrendingUp } from "lucide-react";
 import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
+import DataProvenance from "../components/DataProvenance";
 import { useCargoRequest } from "../hooks/useCargoRequest";
 import { apiRequest, useAuthenticatedUser } from "../services/api";
 import { getStoredRecommendation } from "../services/recommendation";
@@ -54,12 +55,21 @@ function DecisionReport() {
         let active = true;
         const loadReport = async () => {
             if (storedCargoUserId !== userId) throw new Error("The saved cargo request does not belong to the signed-in user.");
+            const cachedRecommendation = getStoredRecommendation(userId, cargoRequestId);
             const cargo = await apiRequest<CargoRequestResponse>(`/api/v1/cargo-requests/${encodeURIComponent(cargoRequestId)}`);
             if (cargo.cargo_request_id !== cargoRequestId || cargo.user_id !== userId) {
                 throw new Error("The backend cargo request could not be verified for this user.");
             }
-            const recommendation = getStoredRecommendation(userId, cargoRequestId);
-            if (!recommendation || recommendation.cargo_request_id !== cargo.cargo_request_id) {
+            const recommendation = [
+                cachedRecommendation,
+                getStoredRecommendation(userId, cargoRequestId),
+            ].find((candidate): candidate is RecommendationResult =>
+                candidate !== null &&
+                candidate.cargo_request_id === cargo.cargo_request_id &&
+                candidate.recommendation_id.trim().length > 0 &&
+                candidate.forecast_run_id.trim().length > 0,
+            );
+            if (!recommendation) {
                 return { status: "no-decision" as const, cargo };
             }
             return { status: "ready" as const, cargo, recommendation };
@@ -91,10 +101,12 @@ function DecisionReport() {
                 <Link to="/decision-overview" className="report-back-link"><ArrowLeft size={16} />Back to Decision Overview</Link>
                 <header className="report-page-header"><div><span className="report-eyebrow">DECISION REPORT</span><h1>Procurement Decision Report</h1><p>Verified procurement decision summary with supporting cost, risk, and recommendation details.</p></div><div className="report-action-wrap"><button type="button" className="report-download-button" disabled={!canPrint} onClick={() => window.print()}><Download size={16} />{canPrint ? "Print / Save as PDF" : "Report export unavailable"}</button>{!canPrint && <span className="report-export-state">A verified recommendation is required before printing this report.</span>}</div></header>
 
+                <DataProvenance />
+
                 {showLoading && <section className="report-state-card" role="status" aria-live="polite"><FileText size={21} /><div><strong>Verifying report data</strong><p>Checking the active cargo with the backend and looking for an existing recommendation from the current workflow.</p></div></section>}
                 {pageState.status === "error" && <section className="report-state-card report-error" role="alert"><AlertCircle size={21} /><div><strong>Report data unavailable</strong><p>{pageState.message}</p><button type="button" className="report-retry-button" onClick={retry}>Retry</button></div></section>}
                 {showNoCargo && <section className="report-state-card" role="status"><Ship size={21} /><div><strong>No active cargo request</strong><p>Create a cargo request before viewing a decision report.</p><Link to="/cargo-request">Create Cargo Request</Link></div></section>}
-                {pageState.status === "no-decision" && cargo && <section className="report-state-card" role="status"><Info size={21} /><div><strong>No existing decision available</strong><p>The cargo was verified, but this page was not opened with a recommendation from the current workflow. Open Decision Overview and use its report link after the recommendation is ready.</p><Link to="/decision-overview">Open Decision Overview</Link></div></section>}
+                {pageState.status === "no-decision" && cargo && <section className="report-state-card" role="status"><Info size={21} /><div><strong>No existing decision available</strong><p>The cargo was verified, but no valid recommendation is saved for this user and cargo request.</p><Link to="/decision-overview">Open Decision Overview</Link></div></section>}
 
                 {cargo && <section className="report-section"><div className="report-section-header"><div><h2>Cargo Request Summary</h2><p>Values refreshed from the backend for this report.</p></div></div><div className="report-summary-grid"><div><span>Commodity</span><strong>{cargo.commodity.replace(/_/g, " ")}</strong></div><div><span>Cargo Volume</span><strong>{cargo.cargo_volume_mt.toLocaleString("en-US", { maximumFractionDigits: 20 })} MT</strong></div><div><span>Origin Port</span><strong>{cargo.origin_port_id}</strong></div><div><span>Destination Port</span><strong>{cargo.destination_port_id}</strong></div><div><span>Delivery Window</span><strong>{cargo.earliest_delivery_date} → {cargo.latest_delivery_date}</strong></div><div><span>Contract Horizon</span><strong>{cargo.contract_horizon.replace(/_/g, " ")}</strong></div></div></section>}
 

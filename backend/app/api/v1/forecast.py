@@ -1,21 +1,43 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.core.dependencies import get_current_user_profile
+from app.core.dependencies import get_current_user_profile, require_roles
 from app.schemas.auth import UserProfileResponse
-from app.schemas.forecast import ForecastRequest, ForecastRunResponse
+from app.schemas.forecast import ForecastRequest, ForecastRunResponse, FreightHistoryResponse
 from app.repositories.forecast_repository import ForecastPersistenceError
 from app.services.forecast_service import forecast_application_service
+from app.services.reference_service import reference_service
+from backend.app.domain.cost.models import FreightUnit
 
 
 router = APIRouter(prefix="/forecast", tags=["Forecast"])
 
 
+@router.get("/history", response_model=FreightHistoryResponse)
+def get_freight_history(
+    route_id: str = Query(..., min_length=1),
+    vessel_class_id: str = Query(..., min_length=1),
+    freight_unit: FreightUnit = Query(...),
+    current_user: UserProfileResponse = Depends(get_current_user_profile),
+) -> FreightHistoryResponse:
+    observations = reference_service.get_freight_observations(
+        route_id, vessel_class_id, freight_unit
+    )
+    return FreightHistoryResponse(
+        route_id=route_id,
+        vessel_class_id=vessel_class_id,
+        freight_unit=freight_unit.value,
+        observations=observations,
+    )
+
+
 @router.post("", response_model=ForecastRunResponse)
 def create_forecast(
     request: ForecastRequest,
-    current_user: UserProfileResponse = Depends(get_current_user_profile),
+    current_user: UserProfileResponse = Depends(
+        require_roles("PLANNER", "MANAGER", "ADMINISTRATOR")
+    ),
 ) -> ForecastRunResponse:
     try:
         result = forecast_application_service.create_forecast(

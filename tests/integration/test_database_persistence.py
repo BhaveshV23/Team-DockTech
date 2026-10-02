@@ -15,15 +15,37 @@ def test_scenario_persistence_uses_database_adapter(
     class DB:
         def __init__(self):
             self.rows = []
+            from pathlib import Path
+            fixture_dir = Path(__file__).resolve().parents[2] / "data" / "reference"
+            self.defaults = [
+                {
+                    "scenario_id": item.scenario_id.value,
+                    "scenario_name": item.scenario_name,
+                    "freight_change_pct": str(item.freight_change_pct),
+                    "fuel_change_pct": str(item.fuel_change_pct),
+                    "delay_hours": str(item.delay_hours),
+                    "port_congestion_level": item.port_congestion_level.value,
+                    "description": item.description,
+                }
+                for item in ScenarioRepository(reference_data_dir=fixture_dir).get_scenario_defaults()
+            ]
 
         def table(self, _name):
             db = self
             class Table:
+                selected = False
+
+                def select(self, *_columns):
+                    self.selected = True
+                    return self
+
                 def insert(self, row):
                     self.row = row
                     return self
 
                 def execute(self):
+                    if self.selected:
+                        return SimpleNamespace(data=db.defaults)
                     db.rows.append(self.row)
                     return SimpleNamespace(data=[self.row])
             return Table()
@@ -43,7 +65,8 @@ def test_scenario_persistence_uses_database_adapter(
 
 def test_scenario_defaults_csv_integrity():
     """Verify canonical CSV has exact 3 rows and valid columns."""
-    repo = ScenarioRepository()
+    from pathlib import Path
+    repo = ScenarioRepository(reference_data_dir=Path(__file__).resolve().parents[2] / "data" / "reference")
     defaults = repo.get_scenario_defaults()
     assert len(defaults) == 3
 

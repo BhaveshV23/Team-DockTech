@@ -4,7 +4,11 @@ import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import { useCargoRequest } from "../hooks/useCargoRequest";
 import { apiRequest, getRoleDescription, getRoleLabel, useAuthenticatedUser } from "../services/api";
-import { createRecommendation } from "../services/recommendation";
+import {
+    createRecommendation,
+    getStoredRecommendation,
+    storeRecommendation,
+} from "../services/recommendation";
 import type { CargoRequestResponse } from "../types/cargo";
 import type { RecommendationResult } from "../types/recommendation";
 import "./Dashboard.css";
@@ -38,13 +42,19 @@ function Dashboard() {
         if (!request) {
             request = (async () => {
                 if (storedCargoUserId !== userId) throw new Error("The saved cargo request does not belong to the signed-in user.");
+                const cachedRecommendation = getStoredRecommendation(userId, cargoRequestId);
                 const cargo = await apiRequest<CargoRequestResponse>(`/api/v1/cargo-requests/${encodeURIComponent(cargoRequestId)}`);
                 if (cargo.cargo_request_id !== cargoRequestId || cargo.user_id !== userId) {
                     throw new Error("The backend cargo request could not be verified for this user.");
                 }
-                const recommendation = await createRecommendation(cargoRequestId);
+                const recommendation = cachedRecommendation ??
+                    getStoredRecommendation(userId, cargoRequestId) ??
+                    await createRecommendation(cargoRequestId);
                 if (recommendation.cargo_request_id !== cargoRequestId) {
                     throw new Error("The backend recommendation does not match the active cargo request.");
+                }
+                if (!cachedRecommendation) {
+                    storeRecommendation(userId, cargoRequestId, recommendation);
                 }
                 return { cargo, recommendation };
             })();
@@ -102,7 +112,7 @@ function Dashboard() {
 
                 <section className="dashboard-section">
                     <div className="dashboard-section-heading"><div><h2>Current Decision Status</h2><p>{recommendation ? "Values returned for the verified cargo request." : "Decision values are shown after the backend workflow completes."}</p></div></div>
-                    {pageState.status === "loading" && <div className="dashboard-request-state" role="status" aria-live="polite"><RefreshCw className="dashboard-spinner" size={22} /><div><strong>Loading current decision</strong><p>Verifying cargo ownership and requesting the backend recommendation.</p></div></div>}
+                    {pageState.status === "loading" && <div className="dashboard-request-state" role="status" aria-live="polite"><RefreshCw className="dashboard-spinner" size={22} /><div><strong>Loading current decision</strong><p>Verifying cargo ownership and loading its recommendation.</p></div></div>}
                     {pageState.status === "error" && <div className="dashboard-request-state dashboard-request-error" role="alert"><AlertCircle size={22} /><div><strong>Decision unavailable</strong><p>{pageState.message}</p><button type="button" className="dashboard-secondary-button dashboard-retry-button" onClick={retry}>Retry</button></div></div>}
                     {showEmptyCargo && pageState.status !== "loading" && pageState.status !== "error" && <div className="dashboard-request-state" role="status"><Ship size={22} /><div><strong>No active cargo request</strong><p>Create a cargo request to load a verified decision.</p><Link to="/cargo-request" className="dashboard-secondary-button">Create Cargo Request<ArrowRight size={16} /></Link></div></div>}
                     {data && <div className="dashboard-summary-grid">

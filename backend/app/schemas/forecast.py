@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Literal
 from uuid import UUID
 
@@ -33,3 +34,17 @@ class ForecastRunResponse(BaseModel):
     model_version: str
     training_data_end_date: str
     forecast_points: list[ForecastPointResponse]
+
+
+class HistoricalFreightObservationResponse(BaseModel):
+    observation_date: date
+    freight_value: float
+    freight_unit: str
+    currency: str
+
+
+class FreightHistoryResponse(BaseModel):
+    route_id: str
+    vessel_class_id: str
+    freight_unit: str
+    observations: list[HistoricalFreightObservationResponse]

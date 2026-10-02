@@ -12,6 +12,17 @@ export interface RecommendationRequest {
 
 export type RecommendationDecimal = number | string;
 
+export interface CandidateComparison {
+    vessel_class_id: string;
+    feasibility_status: "FEASIBLE" | "INFEASIBLE";
+    expected_freight_cost: RecommendationDecimal;
+    expected_total_cost: RecommendationDecimal;
+    effective_cost_per_mt: RecommendationDecimal;
+    estimated_turnaround_hours: RecommendationDecimal;
+    required_voyages: number;
+    risk_level: RecommendationRiskLevel;
+}
+
 export interface RecommendationResult {
     recommendation_id: string;
     cargo_request_id: string;
@@ -27,6 +38,7 @@ export interface RecommendationResult {
     rationale: string;
     assumptions: string;
     created_at: string;
+    candidate_comparisons?: CandidateComparison[];
 }
 
 export interface RecommendationApiResponse {

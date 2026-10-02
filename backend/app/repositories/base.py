@@ -1,8 +1,8 @@
 """
 DockTech V1 — CSV Reference Data Repository (Base)
-Provides thread-safe, cached loading of canonical reference CSV datasets.
-Uses only the existing data/reference/*.csv files as the single source of truth.
-Sources: DATA_DICTIONARY.md, ARCHITECTURE.md
+Provides helpers for reading CSV seed artifacts and explicit offline fixtures.
+Supabase is authoritative for application-runtime reference-data reads. CSV/JSON
+artifacts also support seeding, validation, provenance, and ML inputs.
 """
 
 from __future__ import annotations

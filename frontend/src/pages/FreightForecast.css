@@ -603,6 +603,50 @@
     stroke-width: 1.5;
 }
 
+.forecast-history-line {
+    fill: none;
+    stroke: #64748b;
+    stroke-width: 1.8;
+}
+
+.forecast-history-point {
+    fill: #64748b;
+    stroke: #fff;
+    stroke-width: 0.7;
+}
+
+.forecast-start-marker {
+    stroke: #475569;
+    stroke-width: 1;
+    stroke-dasharray: 3 4;
+}
+
+.forecast-start-label {
+    fill: #475569;
+    font-size: 9px;
+    font-weight: 700;
+}
+
+.forecast-history-status {
+    margin: 0 18px 12px;
+    color: #697386;
+    font-size: 12px;
+}
+
+.forecast-history-error {
+    color: #b42318;
+}
+
+.forecast-history-status button {
+    margin-left: 6px;
+    border: 0;
+    background: transparent;
+    color: #146ef5;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 700;
+}
+
 .forecast-metadata-card {
     margin-top: 16px;
     overflow-wrap: anywhere;

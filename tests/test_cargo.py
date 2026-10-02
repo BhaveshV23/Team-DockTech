@@ -11,14 +11,15 @@ if backend_path not in sys.path:
     sys.path.insert(0, backend_path)
 
 from fastapi.testclient import TestClient
-import jwt
 from app.core.config import settings
 from app.repositories.cargo_repository import cargo_repository
 from app.repositories.user_repository import user_repository
 from main import app
+from tests.auth_test_utils import TEST_SUPABASE_URL, supabase_test_token
 
 TEST_JWT_SECRET = "docktech-test-jwt-secret-key-32-bytes-long"
 settings.SUPABASE_JWT_SECRET = TEST_JWT_SECRET
+settings.SUPABASE_URL = TEST_SUPABASE_URL
 
 client = TestClient(app)
 pytestmark = pytest.mark.usefixtures("fake_supabase_cargo_table")
@@ -39,10 +40,8 @@ def helper_create_test_user(display_name: str = "Test User", role: str = "PLANNE
         "updated_at": now,
     }
     user_repository.add_mock_profile(profile)
-    token = jwt.encode(
-        {"sub": str(auth_user_id), "email": profile["email"]},
-        TEST_JWT_SECRET,
-        algorithm="HS256",
+    token = supabase_test_token(
+        TEST_JWT_SECRET, {"sub": str(auth_user_id), "email": profile["email"]}
     )
     return token, profile
 

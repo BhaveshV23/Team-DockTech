@@ -1,13 +1,34 @@
 from __future__ import annotations
 from dataclasses import dataclass, asdict
 import csv
+import pickle
 from pathlib import Path
 import json
 import math
+import zlib
 import pandas as pd
 from .baseline import seasonal_naive_predict
 from .features import prepare_freight_data, build_feature_row, feature_columns
 from .model import load_model, model_key
+
+
+_MODEL_LOAD_ERRORS = (
+    OSError,
+    EOFError,
+    pickle.UnpicklingError,
+    zlib.error,
+    AttributeError,
+    ImportError,
+    IndexError,
+    KeyError,
+    TypeError,
+    ValueError,
+    OverflowError,
+)
+
+
+class _RidgeInferenceFailure(Exception):
+    """A selected Ridge artifact could not produce a valid numeric forecast."""
 
 
 def _load_scenario_freight_changes() -> dict[str, float]:
@@ -62,7 +83,11 @@ class ForecastService:
                  artifact_path: str = "models/artifacts/freight_forecaster.joblib",
                  metadata_path: str = "models/metadata/freight_forecaster.json"):
         self.data = prepare_freight_data(data_path)
-        self.models = load_model(artifact_path)
+        try:
+            loaded_models = load_model(artifact_path)
+        except _MODEL_LOAD_ERRORS:
+            loaded_models = None
+        self.models = loaded_models if isinstance(loaded_models, dict) else {}
         self.metadata = json.loads(Path(metadata_path).read_text(encoding="utf-8"))
         self.model_version = self.metadata["model_version"]
         self.training_end = self.metadata["training_period"]["end"]
@@ -80,53 +105,127 @@ class ForecastService:
         group = group.sort_values("observation_date")
         history = group[["observation_date", "route_id", "vessel_class_id", "freight_unit", "freight_value"]].copy()
         last_date = history.observation_date.max()
-        points = []
         series_key = model_key(route_id, vessel_class_id, freight_unit)
         selected_model = self.selected_models.get(series_key, "ridge_autoregression")
         model_versions = self.metadata.get("model_versions", {})
-        selected_version = model_versions.get(
-            selected_model,
-            self.model_version if selected_model == "ridge_autoregression" else "docktech-seasonal-naive-7d-v1",
-        )
         future_dates = pd.date_range(last_date + pd.Timedelta(days=1), periods=horizon, freq="D")
         if selected_model == "seasonal_naive_7d":
-            baseline_predictions = seasonal_naive_predict(history, future_dates)
+            predictions = seasonal_naive_predict(history.copy(), future_dates)
+            selected_version = model_versions.get("seasonal_naive_7d", "docktech-seasonal-naive-7d-v1")
+            return self._build_result(
+                route_id, vessel_class_id, freight_unit, horizon,
+                future_dates, predictions, selected_version,
+            )
         elif selected_model != "ridge_autoregression":
             raise ValueError(f"Unsupported selected model {selected_model!r} for {series_key}")
-        for i in range(1, horizon + 1):
-            date = future_dates[i - 1]
-            if selected_model == "seasonal_naive_7d":
-                pred = float(baseline_predictions.iloc[i - 1])
-            else:
-                if series_key not in self.models:
-                    raise ValueError("No trained model is available for this route/vessel/unit combination")
+        else:
+            try:
+                predictions = self._ridge_predictions(
+                    history.copy(), route_id, vessel_class_id, freight_unit,
+                    series_key, future_dates,
+                )
+                selected_version = model_versions.get("ridge_autoregression", self.model_version)
+                return self._build_result(
+                    route_id, vessel_class_id, freight_unit, horizon,
+                    future_dates, predictions, selected_version, ridge_output=True,
+                )
+            except _RidgeInferenceFailure:
+                # Retry the complete horizon using the existing baseline and
+                # original history. Never mix Ridge and fallback points.
+                predictions = seasonal_naive_predict(history.copy(), future_dates)
+                selected_version = model_versions.get("seasonal_naive_7d", "docktech-seasonal-naive-7d-v1")
+        return self._build_result(
+            route_id, vessel_class_id, freight_unit, horizon,
+            future_dates, predictions, selected_version,
+        )
+
+    def _ridge_predictions(
+        self,
+        history: pd.DataFrame,
+        route_id: str,
+        vessel_class_id: str,
+        freight_unit: str,
+        series_key: str,
+        future_dates: pd.DatetimeIndex,
+    ) -> list[float]:
+        estimator = self.models.get(series_key)
+        if estimator is None:
+            raise _RidgeInferenceFailure("Selected Ridge estimator is unavailable")
+        try:
+            predict_method = getattr(estimator, "predict", None)
+        except Exception as exc:
+            raise _RidgeInferenceFailure("Selected Ridge estimator is malformed") from exc
+        if not callable(predict_method):
+            raise _RidgeInferenceFailure("Selected Ridge estimator is unavailable")
+
+        predictions = []
+        for date in future_dates:
+            try:
                 row = build_feature_row(history, route_id, vessel_class_id, freight_unit, date)
-                pred = float(self.models[series_key].predict(pd.DataFrame([row])[feature_columns()[3:]])[0])
-            if not math.isfinite(pred):
-                raise ValueError(f"Model produced a non-finite forecast for {series_key}")
+            except ValueError as exc:
+                raise _RidgeInferenceFailure("Ridge input features could not be prepared") from exc
+            try:
+                output = predict_method(pd.DataFrame([row])[feature_columns()[3:]])
+            except Exception as exc:
+                raise _RidgeInferenceFailure("Selected Ridge inference failed") from exc
+            try:
+                values = pd.Series(output).to_numpy()
+                if values.shape != (1,):
+                    raise ValueError("Ridge prediction must contain exactly one value")
+                prediction = float(values[0])
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise _RidgeInferenceFailure("Selected Ridge returned an invalid prediction") from exc
+            if not math.isfinite(prediction) or prediction <= 0:
+                raise _RidgeInferenceFailure("Selected Ridge returned a nonpositive or non-finite prediction")
+            predictions.append(prediction)
             central = max(
                 0.0,
-                pred * (1 + self.scenario_freight_changes["BASELINE"] / 100),
+                prediction * (1 + self.scenario_freight_changes["BASELINE"] / 100),
             )
             lower = max(
                 0.0,
-                pred * (1 + self.scenario_freight_changes["FAVORABLE"] / 100),
+                prediction * (1 + self.scenario_freight_changes["FAVORABLE"] / 100),
             )
             upper = max(
                 0.0,
-                pred * (1 + self.scenario_freight_changes["ADVERSE"] / 100),
+                prediction * (1 + self.scenario_freight_changes["ADVERSE"] / 100),
             )
+            if not all(math.isfinite(value) for value in (central, lower, upper)):
+                raise _RidgeInferenceFailure("Selected Ridge produced invalid forecast bounds")
+            history = pd.concat([history, pd.DataFrame([{
+                "observation_date": date, "route_id": route_id, "vessel_class_id": vessel_class_id,
+                "freight_unit": freight_unit, "freight_value": central
+            }])], ignore_index=True)
+        return predictions
+
+    def _build_result(
+        self, route_id, vessel_class_id, freight_unit, horizon,
+        dates, predictions, model_version, *, ridge_output=False,
+    ):
+        if len(predictions) != horizon:
+            if ridge_output:
+                raise _RidgeInferenceFailure("Selected Ridge returned an incomplete forecast")
+            raise ValueError("Baseline returned an incomplete forecast")
+        points = []
+        for date, prediction in zip(dates, predictions):
+            pred = float(prediction)
+            if not math.isfinite(pred) or pred <= 0:
+                if ridge_output:
+                    raise _RidgeInferenceFailure("Selected Ridge produced an invalid prediction")
+                raise ValueError("Baseline produced an invalid forecast")
+            central = max(0.0, pred * (1 + self.scenario_freight_changes["BASELINE"] / 100))
+            lower = max(0.0, pred * (1 + self.scenario_freight_changes["FAVORABLE"] / 100))
+            upper = max(0.0, pred * (1 + self.scenario_freight_changes["ADVERSE"] / 100))
+            if not all(math.isfinite(value) for value in (central, lower, upper)):
+                if ridge_output:
+                    raise _RidgeInferenceFailure("Selected Ridge produced invalid forecast bounds")
+                raise ValueError("Baseline forecast bounds are invalid")
             points.append(ForecastPoint(
                 forecast_date=date.date().isoformat(), central=central, lower=lower, upper=upper,
-                freight_unit=freight_unit, model_version=selected_version,
+                freight_unit=freight_unit, model_version=model_version,
                 training_data_end_date=self.training_end,
             ))
-            if selected_model == "ridge_autoregression":
-                history = pd.concat([history, pd.DataFrame([{
-                    "observation_date": date, "route_id": route_id, "vessel_class_id": vessel_class_id,
-                    "freight_unit": freight_unit, "freight_value": central
-                }])], ignore_index=True)
-        return ForecastResult(route_id, vessel_class_id, freight_unit, horizon, selected_version, points)
+        return ForecastResult(route_id, vessel_class_id, freight_unit, horizon, model_version, points)
 
     def forecast_dict(self, route_id: str, vessel_class_id: str, freight_unit: str, horizon: int) -> dict:
         result = self.forecast(route_id, vessel_class_id, freight_unit, horizon)

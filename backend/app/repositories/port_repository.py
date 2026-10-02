@@ -1,5 +1,5 @@
 """DockTech V1 — Port Repository
-Loads and queries canonical port data from data/reference/ports.csv.
+Loads and queries canonical port data from Supabase at runtime, or an explicit CSV fixture.
 Sources: DATA_DICTIONARY.md, ARCHITECTURE.md
 """
 
@@ -15,15 +15,21 @@ from backend.app.repositories.base import _find_data_reference_dir, load_csv_as_
 class PortRepository:
     """
     Repository for canonical Port reference data.
-    Reads from data/reference/ports.csv — the single source of truth.
+    Reads from Supabase unless a CSV data directory is explicitly supplied.
     """
 
     def __init__(self, data_dir: Optional[Path] = None) -> None:
+        self._use_supabase = data_dir is None
         self._data_dir = data_dir or _find_data_reference_dir()
         self._ports: Optional[Dict[str, Port]] = None
 
     def _load(self) -> Dict[str, Port]:
         if self._ports is not None:
+            return self._ports
+
+        if self._use_supabase:
+            from backend.app.repositories.reference_repository import reference_repository
+            self._ports = {port.port_id: port for port in reference_repository.get_port_entities()}
             return self._ports
 
         rows = load_csv_as_dicts(self._data_dir / "ports.csv")

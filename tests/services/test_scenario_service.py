@@ -4,6 +4,8 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
+import csv
+from pathlib import Path
 
 import pytest
 
@@ -25,31 +27,98 @@ class _Table:
     def __init__(self, owner, name):
         self.owner, self.name = owner, name
         self.record = None
+        self.selected = False
+
+    def select(self, *_columns):
+        self.selected = True
+        return self
 
     def insert(self, record):
         self.record = record
         return self
 
     def execute(self):
-        if self.owner.fail:
+        if self.selected and self.owner.fail_reads:
+            raise RuntimeError("database read failed")
+        if not self.selected and self.owner.fail_inserts:
             raise RuntimeError("database down")
+        if self.selected:
+            return _Response(self.owner.scenario_defaults)
         self.owner.rows.append(self.record)
         return _Response([self.record])
 
 
 class _DB:
-    def __init__(self, fail=False):
-        self.fail, self.rows = fail, []
+    def __init__(self, fail=False, fail_reads=False):
+        self.fail_inserts, self.fail_reads, self.rows = fail, fail_reads, []
+        self.scenario_defaults = self._load_scenario_defaults()
+        self.selected_tables = []
 
     def table(self, name):
+        self.selected_tables.append(name)
         return _Table(self, name)
+
+    @staticmethod
+    def _load_scenario_defaults():
+        path = Path(__file__).resolve().parents[2] / "data" / "reference" / "scenario_defaults.csv"
+        with path.open(encoding="utf-8", newline="") as stream:
+            return list(csv.DictReader(stream))
 
 
 def test_scenario_service_loads_canonical_defaults():
-    defaults = ScenarioService().get_scenario_defaults()
+    defaults = ScenarioService(repository=ScenarioRepository(
+        reference_data_dir=Path(__file__).resolve().parents[2] / "data" / "reference"
+    )).get_scenario_defaults()
     assert {d.scenario_id for d in defaults} == {
         ScenarioType.BASELINE, ScenarioType.ADVERSE, ScenarioType.FAVORABLE,
     }
+
+
+def test_default_scenario_repository_uses_shared_supabase_reference_repository(monkeypatch):
+    from backend.app.repositories.reference_repository import reference_repository
+
+    expected_rows = _DB._load_scenario_defaults()
+    queried = []
+
+    def get_rows(table, params):
+        queried.append((table, params))
+        return expected_rows
+
+    monkeypatch.setattr(reference_repository, "get_rows", get_rows)
+    repository = ScenarioRepository()
+    defaults = repository.get_scenario_defaults()
+
+    assert repository.use_supabase_reference_data is True
+    assert queried == [("scenario_defaults", {"order": "scenario_id.asc"})]
+    assert len(defaults) == 3
+
+
+def test_injected_db_client_reads_scenario_defaults_from_database():
+    db = _DB()
+    defaults = ScenarioRepository(db_client=db).get_scenario_defaults()
+
+    assert [default.scenario_id for default in defaults] == [
+        ScenarioType.BASELINE, ScenarioType.ADVERSE, ScenarioType.FAVORABLE,
+    ]
+    assert db.selected_tables == ["scenario_defaults"]
+
+
+def test_injected_db_failure_does_not_read_scenario_defaults_csv(monkeypatch):
+    db = _DB(fail_reads=True)
+    original_open = Path.open
+
+    def reject_scenario_csv(path, *args, **kwargs):
+        if path.name == "scenario_defaults.csv":
+            pytest.fail("scenario_defaults.csv must not be read after a DB failure")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", reject_scenario_csv)
+    repository = ScenarioRepository(db_client=db)
+
+    from backend.app.repositories.scenario_repository import ScenarioStorageUnavailable
+    with pytest.raises(ScenarioStorageUnavailable, match="Canonical scenario defaults are unavailable"):
+        repository.get_scenario_defaults()
+    assert db.selected_tables == ["scenario_defaults"]
 
 
 def test_scenario_service_persists_canonical_set_to_database(sample_decision_inputs):

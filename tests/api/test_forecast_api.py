@@ -146,8 +146,42 @@ def test_forecast_requires_authentication(forecast_api_context):
             json=_payload(forecast_api_context["cargo"]["cargo_request_id"]),
         )
         assert response.status_code == 401
+        history_response = client.get(
+            "/api/v1/forecast/history",
+            params={
+                "route_id": "NEWCASTLE_PARADIP_THERMAL",
+                "vessel_class_id": "PANAMAX",
+                "freight_unit": "USD_PER_MT",
+            },
+        )
+        assert history_response.status_code == 401
     finally:
         app.dependency_overrides[get_current_user_profile] = override
+
+
+@pytest.mark.parametrize("role", ["PLANNER", "MANAGER", "ADMINISTRATOR"])
+def test_forecast_generation_allows_documented_planning_roles(
+    forecast_api_context, role
+):
+    forecast_api_context["profile"]["role"] = role
+    response = client.post(
+        "/api/v1/forecast",
+        json=_payload(forecast_api_context["cargo"]["cargo_request_id"]),
+    )
+    assert response.status_code == 200, response.text
+
+
+def test_forecast_generation_rejects_viewer_and_ignores_payload_role(
+    forecast_api_context,
+):
+    forecast_api_context["profile"]["role"] = "VIEWER"
+    payload = _payload(
+        forecast_api_context["cargo"]["cargo_request_id"],
+        role="ADMINISTRATOR",
+    )
+    response = client.post("/api/v1/forecast", json=payload)
+    assert response.status_code == 403
+    assert forecast_api_context["state"]["runs"] == {}
 
 
 def test_forecast_checks_cargo_ownership(forecast_api_context, monkeypatch):
@@ -159,6 +193,47 @@ def test_forecast_checks_cargo_ownership(forecast_api_context, monkeypatch):
     )
     assert response.status_code == 404
     assert forecast_api_context["state"]["runs"] == {}
+
+
+def test_freight_history_returns_authoritative_reference_observations(forecast_api_context):
+    response = client.get(
+        "/api/v1/forecast/history",
+        params={
+            "route_id": "NEWCASTLE_PARADIP_THERMAL",
+            "vessel_class_id": "PANAMAX",
+            "freight_unit": "USD_PER_MT",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["route_id"] == "NEWCASTLE_PARADIP_THERMAL"
+    assert result["vessel_class_id"] == "PANAMAX"
+    assert result["freight_unit"] == "USD_PER_MT"
+    observations = result["observations"]
+    assert len(observations) == 731
+    assert observations[0] == {
+        "observation_date": "2024-01-01",
+        "freight_value": 15.32,
+        "freight_unit": "USD_PER_MT",
+        "currency": "USD",
+    }
+    assert observations[-1]["observation_date"] == "2025-12-31"
+    assert all(row["freight_unit"] == "USD_PER_MT" for row in observations)
+
+
+def test_freight_history_unsupported_series_returns_no_observations(forecast_api_context):
+    response = client.get(
+        "/api/v1/forecast/history",
+        params={
+            "route_id": "UNSUPPORTED_ROUTE",
+            "vessel_class_id": "PANAMAX",
+            "freight_unit": "USD_PER_MT",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["observations"] == []
 
 
 def test_forecast_rejects_route_inconsistent_with_cargo(forecast_api_context):

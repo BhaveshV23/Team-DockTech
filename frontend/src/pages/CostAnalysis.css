@@ -424,6 +424,24 @@
     font-size: 13px;
 }
 
+.cost-recommended-badge {
+    display: inline-flex;
+    margin-left: 0.5rem;
+    padding: 0.2rem 0.45rem;
+    border: 1px solid var(--color-accent, #55c5a5);
+    border-radius: 999px;
+    color: var(--color-accent, #55c5a5);
+    font-size: 0.7rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.cost-no-comparisons {
+    margin: 0;
+    padding: 0 1.25rem 1.25rem;
+    color: var(--text-secondary, #a8b5c5);
+}
+
 .cost-comparison-table th {
     background: #f8fafc;
     color: #475569;

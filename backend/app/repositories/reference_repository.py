@@ -1,11 +1,9 @@
 """
 DockTech V1 — Reference Data Repository
 
-Provides strongly typed data access abstractions and CSV-backed
-implementations for canonical maritime reference data.
-
-The canonical CSV datasets under data/reference/ remain the
-single source of truth.
+Provides data access abstractions for canonical maritime reference data.
+Application runtime reads use Supabase. The CSV repository remains available
+for explicit offline fixtures and reproducible seed-data validation.
 """
 
 from __future__ import annotations
@@ -32,6 +30,7 @@ from backend.app.repositories.base import (
     _find_data_reference_dir,
     load_csv_as_dicts,
 )
+from backend.app.domain.entities import Port, Berth, VesselClass, Route
 
 
 # ============================================================================
@@ -187,6 +186,11 @@ class ReferenceRepositoryProtocol(Protocol):
     ) -> Decimal:
         ...
 
+    def get_freight_observations(
+        self, route_id: str, vessel_class_id: str, freight_unit: FreightUnit
+    ) -> List[FreightRateRecord]:
+        ...
+
 
 # ============================================================================
 # 3. CSV REFERENCE DATA REPOSITORY
@@ -197,8 +201,7 @@ class CSVReferenceRepository:
     """
     In-memory indexed reference repository loaded from canonical CSV datasets.
 
-    Provides deterministic, reproducible data access without network
-    dependency for the cost engine.
+    Provides deterministic, reproducible access for tests and offline tooling.
     """
 
     def __init__(self, data_dir: Path | str) -> None:
@@ -643,6 +646,13 @@ class CSVReferenceRepository:
 
         return valid[-1].freight_value
 
+    def get_freight_observations(
+        self, route_id: str, vessel_class_id: str, freight_unit: FreightUnit
+    ) -> List[FreightRateRecord]:
+        """Return the stored observations for one canonical freight series."""
+        key = (route_id.strip(), vessel_class_id.strip().upper(), freight_unit.value)
+        return list(self._freight_rates.get(key, []))
+
 
 class ReferenceDataUnavailableError(Exception):
     """Raised when the authoritative Supabase reference store cannot be queried."""
@@ -653,7 +663,7 @@ class ReferenceObservationNotFoundError(Exception):
 
 
 class SupabaseCostReferenceRepository:
-    """Cost reference-data access backed by the canonical Supabase tables."""
+    """Application reference-data access backed by canonical Supabase tables."""
 
     def __init__(self, supabase_url: str | None = None, service_role_key: str | None = None):
         self.supabase_url = settings.SUPABASE_URL if supabase_url is None else supabase_url
@@ -693,6 +703,125 @@ class SupabaseCostReferenceRepository:
         if not rows:
             raise missing_error
         return rows[0]
+
+    def get_rows(self, table: str, filters: Dict[str, str] | None = None) -> List[Dict[str, Any]]:
+        """Return reference rows for application repositories and API services."""
+        params = dict(filters or {})
+        return self._get(table, params)
+
+    def get_ports(self) -> List[Dict[str, Any]]:
+        return self.get_rows("ports", {"order": "port_id.asc"})
+
+    def get_vessels(self) -> List[Dict[str, Any]]:
+        return self.get_rows("vessel_classes", {"order": "vessel_class_id.asc"})
+
+    def get_routes(self) -> List[Dict[str, Any]]:
+        return self.get_rows("routes", {"order": "route_id.asc"})
+
+    def get_freight_observations(
+        self, route_id: str, vessel_class_id: str, freight_unit: FreightUnit
+    ) -> List[FreightRateRecord]:
+        rows = self._get("freight_rates", {
+            "route_id": f"eq.{route_id.strip()}",
+            "vessel_class_id": f"eq.{vessel_class_id.strip().upper()}",
+            "freight_unit": f"eq.{freight_unit.value}",
+            "order": "observation_date.asc",
+        })
+        return [FreightRateRecord(
+            freight_rate_id=row["freight_rate_id"],
+            observation_date=datetime.date.fromisoformat(row["observation_date"]),
+            route_id=row["route_id"], vessel_class_id=row["vessel_class_id"],
+            freight_value=Decimal(str(row["freight_value"])),
+            freight_unit=FreightUnit.from_str(row["freight_unit"]),
+            currency=row["currency"], data_type=row["data_type"], source=row["source"],
+        ) for row in rows]
+
+    def get_port_entity(self, port_id: str) -> Optional[Port]:
+        rows = self._get("ports", {"port_id": f"eq.{port_id.strip()}", "limit": "1"})
+        return self._port_entity(rows[0]) if rows else None
+
+    def get_port_entities(self) -> List[Port]:
+        return [self._port_entity(row) for row in self.get_ports()]
+
+    @staticmethod
+    def _port_entity(row: Dict[str, Any]) -> Port:
+        return Port(
+            port_id=row["port_id"], port_name=row["port_name"], country=row["country"],
+            max_loa_m=float(row["max_loa_m"]), max_beam_m=float(row["max_beam_m"]),
+            max_draft_m=float(row["max_draft_m"]), handling_rate_tpd=float(row["handling_rate_tpd"]),
+            typical_turnaround_hours=float(row["typical_turnaround_hours"]),
+            source=row["source"], data_type=row["data_type"],
+        )
+
+    def get_berth_entities(self, port_id: str) -> List[Berth]:
+        rows = self._get("berths", {"port_id": f"eq.{port_id.strip()}", "order": "berth_id.asc"})
+        return [Berth(
+            berth_id=row["berth_id"], port_id=row["port_id"], berth_name=row["berth_name"],
+            commodity=row["commodity"], max_loa_m=float(row["max_loa_m"]),
+            max_beam_m=float(row["max_beam_m"]), max_draft_m=float(row["max_draft_m"]),
+            handling_rate_tpd=float(row["handling_rate_tpd"]), source=row["source"],
+            data_type=row["data_type"],
+        ) for row in rows]
+
+    def get_berth_entities_for_all_ports(self) -> List[Berth]:
+        rows = self._get("berths", {"order": "berth_id.asc"})
+        return [Berth(
+            berth_id=row["berth_id"], port_id=row["port_id"], berth_name=row["berth_name"],
+            commodity=row["commodity"], max_loa_m=float(row["max_loa_m"]),
+            max_beam_m=float(row["max_beam_m"]), max_draft_m=float(row["max_draft_m"]),
+            handling_rate_tpd=float(row["handling_rate_tpd"]), source=row["source"],
+            data_type=row["data_type"],
+        ) for row in rows]
+
+    def get_vessel_entity(self, vessel_class_id: str) -> Optional[VesselClass]:
+        try:
+            record = self.get_vessel_class(vessel_class_id)
+        except VesselClassNotFoundError:
+            return None
+        return VesselClass(
+            vessel_class_id=record.vessel_class_id, vessel_class_name=record.vessel_class_name,
+            dwt_min_mt=float(record.dwt_min_mt), dwt_max_mt=float(record.dwt_max_mt),
+            loa_m=float(record.loa_m), beam_m=float(record.beam_m), draft_m=float(record.draft_m),
+            speed_knots=float(record.speed_knots), cargo_capacity_mt=float(record.cargo_capacity_mt),
+            fuel_consumption_mt_day=float(record.fuel_consumption_mt_day),
+            source=record.source, data_type=record.data_type,
+        )
+
+    def get_vessel_entities(self) -> List[VesselClass]:
+        return [self._vessel_entity(row) for row in self.get_vessels()]
+
+    @staticmethod
+    def _vessel_entity(row: Dict[str, Any]) -> VesselClass:
+        return VesselClass(
+            vessel_class_id=row["vessel_class_id"], vessel_class_name=row["vessel_class_name"],
+            dwt_min_mt=float(row["dwt_min_mt"]), dwt_max_mt=float(row["dwt_max_mt"]),
+            loa_m=float(row["loa_m"]), beam_m=float(row["beam_m"]), draft_m=float(row["draft_m"]),
+            speed_knots=float(row["speed_knots"]), cargo_capacity_mt=float(row["cargo_capacity_mt"]),
+            fuel_consumption_mt_day=float(row["fuel_consumption_mt_day"]),
+            source=row["source"], data_type=row["data_type"],
+        )
+
+    def get_route_entity(
+        self, origin_port_id: str, destination_port_id: str, commodity: str
+    ) -> Optional[Route]:
+        rows = self._get("routes", {
+            "origin_port_id": f"eq.{origin_port_id.strip()}",
+            "destination_port_id": f"eq.{destination_port_id.strip()}",
+            "commodity": f"eq.{commodity.strip()}", "limit": "1",
+        })
+        return self._route_entity(rows[0]) if rows else None
+
+    @staticmethod
+    def _route_entity(row: Dict[str, Any]) -> Route:
+        return Route(
+            route_id=row["route_id"], origin_port_id=row["origin_port_id"],
+            destination_port_id=row["destination_port_id"], commodity=row["commodity"],
+            distance_nm=float(row["distance_nm"]), typical_sailing_days=float(row["typical_sailing_days"]),
+            source=row["source"], data_type=row["data_type"],
+        )
+
+    def get_route_entities(self) -> List[Route]:
+        return [self._route_entity(row) for row in self.get_routes()]
 
     def get_route(self, origin_port_id: str, destination_port_id: str, commodity: str) -> RouteRecord:
         row = self._one(
@@ -807,6 +936,4 @@ class SupabaseCostReferenceRepository:
 # Existing reference-service compatibility instance
 # ============================================================================
 
-reference_repository = CSVReferenceRepository(
-    data_dir=_find_data_reference_dir()
-)
+reference_repository = SupabaseCostReferenceRepository()

@@ -279,9 +279,18 @@ def test_recommendation_is_persisted_after_success_and_returned_from_saved_row(u
     service, _, _, _, _ = make_service(repository=store)
     result = recommend(service, user_profile)
     assert len(store.calls) == 1
-    assert result == store.calls[0]
+    assert result.recommendation_id == store.calls[0].recommendation_id
     assert result.recommended_vessel_class_id == "V2"
     assert result.forecast_run_id == uid(10 + sum(b"V2"))
+    assert [item.vessel_class_id for item in result.candidate_comparisons] == ["V1", "V2"]
+    selected = next(item for item in result.candidate_comparisons if item.vessel_class_id == "V2")
+    assert selected.feasibility_status is FeasibilityStatus.FEASIBLE
+    assert selected.expected_freight_cost == result.expected_freight_cost
+    assert selected.expected_total_cost == result.expected_total_cost
+    assert selected.effective_cost_per_mt == Decimal("3")
+    assert selected.estimated_turnaround_hours == result.estimated_turnaround_hours
+    assert selected.required_voyages == result.required_voyages == 1
+    assert selected.risk_level is result.risk_level is RiskLevel.LOW
 
 
 def test_repository_failure_propagates(user_profile):
@@ -340,6 +349,7 @@ def test_infeasible_candidate_skips_forecast_cost_and_scenarios(user_profile):
     assert [call["vessel_class_id"] for call in forecasts.calls] == ["V2"]
     assert [call["vessel_class_id"] for call in costs.calls] == ["V2"]
     assert len(scenarios.calls) == 1
+    assert [item.vessel_class_id for item in result.candidate_comparisons] == ["V2"]
 
 
 @pytest.mark.parametrize(

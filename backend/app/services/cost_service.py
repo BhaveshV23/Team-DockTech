@@ -182,6 +182,7 @@ class CostApplicationService:
         forecast_run_id: UUID,
         user_profile: UserProfileResponse,
         freight_rate_override: Optional[Decimal] = None,
+        use_forecast_central_rate: bool = False,
         scenario_delay_hours: Decimal = Decimal("0.0"),
         freight_adjustment_pct: Decimal = Decimal("0.0"),
         fuel_adjustment_pct: Decimal = Decimal("0.0"),
@@ -211,6 +212,27 @@ class CostApplicationService:
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise CostContextError("Forecast run has no valid training data end date") from exc
+
+        if use_forecast_central_rate and freight_rate_override is not None:
+            raise CostContextError(
+                "A freight rate override cannot be combined with the forecast central rate"
+            )
+
+        if use_forecast_central_rate:
+            points = self.forecast_repo.get_forecast_points(forecast_run_id)
+            try:
+                points = sorted(points, key=lambda row: str(row["forecast_date"]))
+                if not points:
+                    raise ValueError("Forecast run has no points")
+                if any(row.get("unit") != forecast.get("freight_unit") for row in points):
+                    raise ValueError("Forecast point unit differs from forecast run")
+                freight_rate_override = Decimal(str(points[0]["central_value"]))
+                if freight_rate_override <= 0:
+                    raise ValueError("Forecast central rate must be positive")
+            except (KeyError, TypeError, ValueError, ArithmeticError) as exc:
+                raise CostContextError(
+                    "Unable to resolve the forecast central freight rate"
+                ) from exc
 
         return self.engine.calculate(
             cargo_volume_mt=Decimal(str(cargo.cargo_volume_mt)),

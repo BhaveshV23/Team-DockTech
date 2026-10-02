@@ -13,10 +13,12 @@ import jwt
 from app.core.config import settings
 from app.repositories.user_repository import user_repository
 from main import app
+from tests.auth_test_utils import TEST_SUPABASE_URL, supabase_test_token
 
 # Set test JWT secret for signature verification testing
 TEST_JWT_SECRET = "docktech-test-jwt-secret-key-32-bytes-long"
 settings.SUPABASE_JWT_SECRET = TEST_JWT_SECRET
+settings.SUPABASE_URL = TEST_SUPABASE_URL
 
 client = TestClient(app)
 
@@ -75,10 +77,8 @@ def test_auth_me_user_profile_not_found():
     """Verify GET /api/v1/auth/me returns 404 when authenticated user has no user_profiles record."""
     auth_user_id = str(uuid4())
 
-    token = jwt.encode(
-        {"sub": auth_user_id, "email": "unknown@docktech.com"},
-        TEST_JWT_SECRET,
-        algorithm="HS256",
+    token = supabase_test_token(
+        TEST_JWT_SECRET, {"sub": auth_user_id, "email": "unknown@docktech.com"}
     )
 
     response = client.get(
@@ -107,10 +107,9 @@ def test_auth_me_successful():
     user_repository.add_mock_profile(mock_profile)
 
     try:
-        token = jwt.encode(
-            {"sub": str(auth_user_id), "email": "manager@docktech.com"},
+        token = supabase_test_token(
             TEST_JWT_SECRET,
-            algorithm="HS256",
+            {"sub": str(auth_user_id), "email": "manager@docktech.com"},
         )
 
         response = client.get(

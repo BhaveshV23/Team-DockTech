@@ -1,13 +1,18 @@
+"""Authoritative DockTech FastAPI application entrypoint."""
+
 import os
 import sys
 
-# Ensure backend directory is in Python path for app module resolution
+# Keep existing `app.*` imports used by the route modules working when started
+# from the repository root as `uvicorn backend.main:app`.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from app.api.router import api_router
 from app.core.config import settings
+
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -18,7 +23,6 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# Configure CORS for frontend development and production origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -33,5 +37,4 @@ def root():
     return {"message": "DockTech API is running"}
 
 
-# Include API v1 router under /api/v1
 app.include_router(api_router, prefix=settings.API_V1_STR)

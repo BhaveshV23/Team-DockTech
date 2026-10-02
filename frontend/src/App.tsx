@@ -54,7 +54,8 @@ function AuthProvider({ children }: { children: ReactNode }) {
 
       if (active) setAuth({ status: "loading" });
       try {
-        const profile = await apiRequest<AuthProfile>("/api/v1/auth/me", {
+        const profile = await apiRequest<AuthProfile>("/api/v1/auth/provision", {
+          method: "POST",
           headers: { Authorization: `Bearer ${session.access_token}` },
         });
         if (active && currentValidation === validation) {

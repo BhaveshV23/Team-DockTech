@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import importlib
+from functools import lru_cache
 from datetime import date
 from pathlib import Path
 from typing import Dict, List
@@ -17,6 +18,40 @@ from backend.app.domain.entities import Berth, CargoRequest, DecisionInputs, Por
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_REFERENCE_DIR = PROJECT_ROOT / "data" / "reference"
+
+
+@lru_cache(maxsize=9)
+def _seed_reference_rows(table: str):
+    with (DATA_REFERENCE_DIR / f"{table}.csv").open(encoding="utf-8", newline="") as stream:
+        return tuple(csv.DictReader(stream))
+
+
+@pytest.fixture(autouse=True)
+def fake_supabase_reference_tables(monkeypatch):
+    """Model the seeded Supabase reference tables from their checked-in seed rows."""
+    repository_modules = [
+        importlib.import_module("backend.app.repositories.reference_repository"),
+        importlib.import_module("app.repositories.reference_repository"),
+    ]
+    def query_rows(_repository, table, params):
+        rows = list(_seed_reference_rows(table))
+        for key, condition in params.items():
+            if key in {"order", "limit", "select"}:
+                continue
+            operator, _, expected = condition.partition(".")
+            if operator == "eq":
+                rows = [row for row in rows if str(row.get(key)) == expected]
+            elif operator == "lte":
+                rows = [row for row in rows if str(row.get(key)) <= expected]
+        if "order" in params:
+            field, _, direction = params["order"].partition(".")
+            rows.sort(key=lambda row: row.get(field, ""), reverse=direction.lower() == "desc")
+        if "limit" in params:
+            rows = rows[: int(params["limit"])]
+        return [dict(row) for row in rows]
+
+    for repository_module in repository_modules:
+        monkeypatch.setattr(repository_module.SupabaseCostReferenceRepository, "_get", query_rows)
 
 
 @pytest.fixture

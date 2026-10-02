@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AlertCircle, ArrowLeft, CheckCircle2, Info, RefreshCw, TrendingDown, TrendingUp } from "lucide-react";
 import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
+import DataProvenance from "../components/DataProvenance";
 import { useCargoRequest } from "../hooks/useCargoRequest";
 import { apiRequest, useAuthenticatedUser } from "../services/api";
 import {
@@ -113,14 +114,18 @@ function ScenariosRisk() {
         if (!cargoRequestId || !cargoUserId || !userId) return;
         let active = true;
         const loadScenarios = async (): Promise<PageState> => {
+            const key = `${userId}:${cargoRequestId}`;
+            const cachedRecommendation = getStoredRecommendation(userId, cargoRequestId);
             const cargo = await apiRequest<CargoRequestResponse>(`/api/v1/cargo-requests/${encodeURIComponent(cargoRequestId)}`);
             if (cargo.cargo_request_id !== cargoRequestId || cargo.user_id !== userId || cargoUserId !== userId) {
                 throw new Error("The active cargo request could not be verified for this user.");
             }
 
-            const key = `${userId}:${cargoRequestId}`;
-            let recommendation = getStoredRecommendation(userId, cargoRequestId);
-            if (!recommendation) {
+            let recommendation = cachedRecommendation?.cargo_request_id === cargoRequestId &&
+                cachedRecommendation.forecast_run_id.trim()
+                ? cachedRecommendation
+                : getStoredRecommendation(userId, cargoRequestId);
+            if (!recommendation || recommendation.cargo_request_id !== cargoRequestId || !recommendation.forecast_run_id.trim()) {
                 let recommendationRequest = recommendationRequestRef.current?.key === key
                     ? recommendationRequestRef.current.promise
                     : null;
@@ -157,7 +162,19 @@ function ScenariosRisk() {
                 body: JSON.stringify({ cargo_request_id: cargoRequestId, forecast_run_id: recommendation.forecast_run_id }),
             });
             const canonical = unwrap(canonicalResponse, "Canonical scenarios");
-            return { status: "ready", cargo, forecastRunId: recommendation.forecast_run_id, defaults, canonical };
+            if (
+                canonical.baseline?.cargo_request_id !== cargoRequestId ||
+                canonical.adverse?.cargo_request_id !== cargoRequestId ||
+                canonical.favorable?.cargo_request_id !== cargoRequestId
+            ) {
+                throw new Error("The canonical scenario response does not match the active cargo request.");
+            }
+            const readyState: PageState = { status: "ready", cargo, forecastRunId: recommendation.forecast_run_id, defaults, canonical };
+            if (active) {
+                setPageState(readyState);
+                setCustomState({ status: "idle" });
+            }
+            return readyState;
         };
         const key = `${userId}:${cargoRequestId}`;
         let pageLoadRequest = pageLoadRequestRef.current?.key === key ? pageLoadRequestRef.current.promise : null;
@@ -239,6 +256,8 @@ function ScenariosRisk() {
                 {visiblePageState.status === "loading" && <section className="scenarios-page-state" role="status" aria-live="polite"><RefreshCw className="scenarios-spinner" /><div><h2>Loading scenario analysis</h2><p>Verifying cargo and loading its recommendation forecast run, defaults, and canonical scenarios.</p></div></section>}
                 {visiblePageState.status === "error" && <section className="scenarios-page-state scenarios-error" role="alert"><AlertCircle /><div><h2>Scenario analysis unavailable</h2><p>{visiblePageState.message}</p><button type="button" className="scenarios-submit-button" onClick={retry}>Retry</button></div></section>}
                 {visiblePageState.status === "empty" && <section className="scenarios-page-state" role="status"><Info /><div><h2>No scenario data</h2><p>{visiblePageState.message}</p>{cargoRequestId ? <button type="button" className="scenarios-submit-button" onClick={retry}>Retry</button> : <Link to="/cargo-request">Create Cargo Request</Link>}</div></section>}
+
+                <DataProvenance />
 
                 {pageState.status === "ready" && visiblePageState.status === "ready" && <>
                     <section className="scenarios-request-card"><div><span className="scenarios-request-label">VERIFIED CARGO REQUEST</span><h2>{pageState.cargo.commodity.replace(/_/g, " ")}</h2><div className="scenarios-provenance"><small>Cargo Request ID: {pageState.cargo.cargo_request_id}</small><small>Forecast Run ID: {pageState.forecastRunId}</small></div></div><div className="scenarios-request-details"><div><span>Volume</span><strong>{pageState.cargo.cargo_volume_mt} MT</strong></div><div><span>Origin</span><strong>{pageState.cargo.origin_port_id}</strong></div><div><span>Destination</span><strong>{pageState.cargo.destination_port_id}</strong></div></div></section>

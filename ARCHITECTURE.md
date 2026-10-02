@@ -256,6 +256,19 @@ FastAPI Repositories & Application Services
 Domain Feasibility, ML Forecasting, & Decision Engine
 ```
 
+Application runtime reference lookups (reference APIs, cargo port validation,
+feasibility, forecast route validation and history, cost, scenarios, and
+recommendation inputs) read the seeded Supabase reference tables through
+FastAPI repositories. Checked-in CSV files remain seed/validation and
+provenance artifacts. `freight_rates.csv` also remains the explicit input for
+ML training and inference; this exception does not make it the application
+runtime source for historical API or cost lookups. Scenario defaults used by
+application scenarios are read from Supabase; the ML forecast interval
+configuration continues to use the checked-in defaults artifact. No normal
+application runtime path falls back to CSV when Supabase reference data is
+unavailable. Deployments must seed Supabase from the validated reference
+artifacts before serving those workflows.
+
 ### Governance Rules for Synthetic Data:
 1. **Provenance Metadata:** Every synthetic record carries `source = 'SYNTHETIC_GENERATOR_V1'` and `data_type = 'SYNTHETIC'`.
 2. **No False Authority:** Synthetic constraints, route distances, handling rates, and freight rates must never be presented in the UI or documentation as official port limits or certified market quotes.

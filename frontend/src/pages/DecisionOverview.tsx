@@ -68,6 +68,8 @@ function DecisionOverview() {
 
         if (!promise) {
             promise = (async () => {
+                // Read the user-and-cargo scoped cache before doing any network work.
+                const cachedRecommendation = getStoredRecommendation(userId, cargoRequestId);
                 const cargoRequest = await apiRequest<CargoRequestResponse>(
                     `/api/v1/cargo-requests/${encodeURIComponent(cargoRequestId)}`,
                 );
@@ -78,8 +80,10 @@ function DecisionOverview() {
                     throw new Error("The saved cargo request does not match the current user or request.");
                 }
 
-                const cachedRecommendation = getStoredRecommendation(userId, cargoRequestId);
+                // Recheck after ownership validation in case another page populated
+                // the shared cache while the cargo request was being verified.
                 const recommendation = cachedRecommendation ??
+                    getStoredRecommendation(userId, cargoRequestId) ??
                     await createRecommendation(cargoRequestId);
                 if (recommendation.cargo_request_id !== cargoRequestId) {
                     throw new Error("The backend recommendation belongs to a different cargo request.");

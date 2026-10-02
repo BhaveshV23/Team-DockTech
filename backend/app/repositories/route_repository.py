@@ -1,6 +1,6 @@
 """
 DockTech V1 — Route Repository
-Loads and queries canonical route data from data/reference/routes.csv.
+Loads and queries canonical route data from Supabase at runtime, or an explicit CSV fixture.
 Sources: DATA_DICTIONARY.md, ARCHITECTURE.md
 """
 
@@ -16,10 +16,11 @@ from backend.app.repositories.base import _find_data_reference_dir, load_csv_as_
 class RouteRepository:
     """
     Repository for canonical Route reference data.
-    Reads from data/reference/routes.csv — the single source of truth.
+    Reads from Supabase unless a CSV data directory is explicitly supplied.
     """
 
     def __init__(self, data_dir: Optional[Path] = None) -> None:
+        self._use_supabase = data_dir is None
         self._data_dir = data_dir or _find_data_reference_dir()
         self._routes: Optional[Dict[str, Route]] = None
         self._route_by_key: Optional[Dict[Tuple[str, str, str], Route]] = None
@@ -27,7 +28,11 @@ class RouteRepository:
     def _load(self) -> Dict[str, Route]:
         if self._routes is not None:
             return self._routes
-        rows = load_csv_as_dicts(self._data_dir / "routes.csv")
+        if self._use_supabase:
+            from backend.app.repositories.reference_repository import reference_repository
+            rows = reference_repository.get_routes()
+        else:
+            rows = load_csv_as_dicts(self._data_dir / "routes.csv")
         self._routes = {}
         self._route_by_key = {}
         for row in rows:

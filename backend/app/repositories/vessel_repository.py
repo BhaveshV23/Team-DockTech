@@ -1,6 +1,6 @@
 """
 DockTech V1 — Vessel Repository
-Loads and queries canonical vessel class data from data/reference/vessel_classes.csv.
+Loads and queries canonical vessel class data from Supabase at runtime, or an explicit CSV fixture.
 Sources: DATA_DICTIONARY.md, ARCHITECTURE.md
 """
 
@@ -16,16 +16,22 @@ from backend.app.repositories.base import _find_data_reference_dir, load_csv_as_
 class VesselRepository:
     """
     Repository for canonical VesselClass reference data.
-    Reads from data/reference/vessel_classes.csv — the single source of truth.
+    Reads from Supabase unless a CSV data directory is explicitly supplied.
     """
 
     def __init__(self, data_dir: Optional[Path] = None) -> None:
+        self._use_supabase = data_dir is None
         self._data_dir = data_dir or _find_data_reference_dir()
         self._vessels: Optional[Dict[str, VesselClass]] = None
 
     def _load(self) -> Dict[str, VesselClass]:
         if self._vessels is not None:
             return self._vessels
+        if self._use_supabase:
+            from backend.app.repositories.reference_repository import reference_repository
+            self._vessels = {vessel.vessel_class_id: vessel for vessel in reference_repository.get_vessel_entities()}
+            return self._vessels
+
         rows = load_csv_as_dicts(self._data_dir / "vessel_classes.csv")
         self._vessels = {}
         for row in rows:

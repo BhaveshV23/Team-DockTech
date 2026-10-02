@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
+import DataProvenance from "../components/DataProvenance";
 import { useCargoRequest } from "../hooks/useCargoRequest";
 import { apiRequest, useAuthenticatedUser } from "../services/api";
 import { getStoredRecommendation } from "../services/recommendation";
@@ -108,17 +109,12 @@ function CostAnalysis() {
                 ) {
                     throw new Error("No matching cached recommendation is available. Open Decision Overview before viewing cost analysis.");
                 }
-                const forecastRate = Number(recommendation.expected_freight_cost) / cargo.cargo_volume_mt;
-                if (!Number.isFinite(forecastRate) || forecastRate <= 0) {
-                    throw new Error("The cached recommendation does not contain a valid forecast-derived freight rate.");
-                }
-
                 const cost = await apiRequest<CostResponse>("/api/v1/cost", {
                     method: "POST",
                     body: JSON.stringify({
                         cargo_request_id: cargoRequestId,
                         forecast_run_id: recommendation.forecast_run_id,
-                        freight_rate_override: forecastRate,
+                        use_forecast_central_rate: true,
                     }),
                 });
                 return { cargo, recommendation, cost };
@@ -176,6 +172,8 @@ function CostAnalysis() {
                         {showEmpty ? "No active request" : pageState.status === "loading" ? "Loading cost data" : pageState.status === "success" ? "Cost available" : "Cost unavailable"}
                     </div>
                 </header>
+
+                <DataProvenance />
 
                 {showEmpty ? (
                     <section className="cost-comparison-card">
@@ -266,6 +264,35 @@ function CostAnalysis() {
                                 <div className="cost-operational-item"><span>Turnaround</span><strong>{cost.estimated_turnaround_hours.toFixed(2)} h</strong></div>
                                 <div className="cost-operational-item"><span>Required voyages</span><strong>{cost.required_voyages.toFixed(0)}</strong></div>
                             </div>
+                        </section>
+
+                        <section className="cost-comparison-card">
+                            <div className="cost-card-header">
+                                <div>
+                                    <h2>Feasible Vessel Cost Comparison</h2>
+                                    <p>Backend-calculated economics and risk for each feasible vessel candidate.</p>
+                                </div>
+                                <span className="cost-option-count">{recommendation.candidate_comparisons?.length ?? 0} feasible options</span>
+                            </div>
+                            {recommendation.candidate_comparisons?.length ? (
+                                <div className="cost-table-wrapper">
+                                    <table className="cost-comparison-table">
+                                        <thead><tr><th>Vessel Class</th><th>Feasibility</th><th>Expected Freight</th><th>Expected Total Cost</th><th>Effective Cost / MT</th><th>Turnaround</th><th>Required Voyages</th><th>Risk</th></tr></thead>
+                                        <tbody>{recommendation.candidate_comparisons.map((option) => (
+                                            <tr key={option.vessel_class_id}>
+                                                <td>{option.vessel_class_id}{option.vessel_class_id === recommendation.recommended_vessel_class_id ? <span className="cost-recommended-badge">Recommended</span> : null}</td>
+                                                <td>{option.feasibility_status}</td>
+                                                <td>{formatUsd(Number(option.expected_freight_cost))}</td>
+                                                <td>{formatUsd(Number(option.expected_total_cost))}</td>
+                                                <td>{formatUsd(Number(option.effective_cost_per_mt))} / MT</td>
+                                                <td>{Number(option.estimated_turnaround_hours).toFixed(2)} h</td>
+                                                <td>{option.required_voyages}</td>
+                                                <td>{option.risk_level}</td>
+                                            </tr>
+                                        ))}</tbody>
+                                    </table>
+                                </div>
+                            ) : <p className="cost-no-comparisons">No feasible-vessel comparison was returned with this saved recommendation.</p>}
                         </section>
 
                         <section className="cost-comparison-card">

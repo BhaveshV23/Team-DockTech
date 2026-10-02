@@ -30,6 +30,18 @@ class RecommendationConfidence(str, Enum):
 
 
 @dataclass(frozen=True)
+class CandidateComparison:
+    vessel_class_id: str
+    feasibility_status: FeasibilityStatus
+    expected_freight_cost: Decimal
+    expected_total_cost: Decimal
+    effective_cost_per_mt: Decimal
+    estimated_turnaround_hours: Decimal
+    required_voyages: int
+    risk_level: RiskLevel
+
+
+@dataclass(frozen=True)
 class ForecastPointEvidence:
     forecast_date: date
     lower_value: Decimal
@@ -135,3 +147,7 @@ class RecommendationResult:
     trend: str
     forecast_uncertainty: tuple[Decimal, Decimal, Decimal]
     required_voyages: int
+    candidate_comparisons: tuple[CandidateComparison, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "candidate_comparisons", tuple(self.candidate_comparisons))

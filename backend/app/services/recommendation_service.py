@@ -26,6 +26,7 @@ from backend.app.domain.recommendation.errors import (
     MissingRecommendationEvidenceError,
 )
 from backend.app.domain.recommendation.models import (
+    CandidateComparison,
     CandidateEvidence,
     CostEvidence,
     ForecastPointEvidence,
@@ -35,6 +36,7 @@ from backend.app.domain.recommendation.models import (
     RecommendationResult,
     ScenarioRiskEvidence,
 )
+from backend.app.domain.recommendation.rules import worst_risk
 from backend.app.repositories.reference_repository import SupabaseCostReferenceRepository
 from backend.app.repositories.route_repository import RouteRepository
 from backend.app.repositories.vessel_repository import VesselRepository
@@ -225,7 +227,21 @@ class RecommendationService:
         decision = self.recommendation_engine.recommend(request)
         self._validate_decision(decision, request)
         persisted = self.recommendation_repository.create(decision)
-        return self._persisted_result(decision, persisted)
+        result = self._persisted_result(decision, persisted)
+        comparisons = tuple(
+            CandidateComparison(
+                vessel_class_id=candidate.vessel_class_id,
+                feasibility_status=candidate.feasibility_status,
+                expected_freight_cost=candidate.cost.expected_freight_cost,
+                expected_total_cost=candidate.cost.expected_total_cost,
+                effective_cost_per_mt=candidate.cost.effective_cost_per_mt,
+                estimated_turnaround_hours=candidate.cost.estimated_turnaround_hours,
+                required_voyages=candidate.cost.required_voyages,
+                risk_level=worst_risk(item.risk_level for item in candidate.scenario_risks),
+            )
+            for candidate in evidence_candidates
+        )
+        return replace(result, candidate_comparisons=comparisons)
 
     @staticmethod
     def _validate_decision(result: RecommendationResult, request: RecommendationInput) -> None:

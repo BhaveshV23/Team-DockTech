@@ -41,6 +41,8 @@ class CostRequest(BaseModel):
         gt=0,
     )
 
+    use_forecast_central_rate: bool = False
+
     scenario_delay_hours: Decimal = Field(
         default=Decimal("0.0"),
         ge=0,
@@ -101,6 +103,7 @@ def calculate_cost(
             forecast_run_id=request.forecast_run_id,
             user_profile=current_user,
             freight_rate_override=request.freight_rate_override,
+            use_forecast_central_rate=request.use_forecast_central_rate,
             scenario_delay_hours=request.scenario_delay_hours,
             freight_adjustment_pct=request.freight_adjustment_pct,
             fuel_adjustment_pct=request.fuel_adjustment_pct,

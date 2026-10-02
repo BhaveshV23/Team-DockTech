@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
 
-import jwt
 from fastapi.testclient import TestClient
 from fastapi import HTTPException
 
@@ -20,10 +19,12 @@ from main import app
 from backend.app.domain.cost.errors import InsufficientFuelPriceDataError
 from backend.app.domain.cost.models import FreightUnit
 from backend.app.repositories.reference_repository import SupabaseCostReferenceRepository
+from tests.auth_test_utils import TEST_SUPABASE_URL, supabase_test_token
 
 
 TEST_JWT_SECRET = "docktech-test-jwt-secret-key-32-bytes-long"
 settings.SUPABASE_JWT_SECRET = TEST_JWT_SECRET
+settings.SUPABASE_URL = TEST_SUPABASE_URL
 client = TestClient(app)
 
 
@@ -41,10 +42,8 @@ def _authenticated_headers():
         "updated_at": now,
     }
     user_repository.add_mock_profile(profile)
-    token = jwt.encode(
-        {"sub": str(auth_user_id), "email": profile["email"]},
-        TEST_JWT_SECRET,
-        algorithm="HS256",
+    token = supabase_test_token(
+        TEST_JWT_SECRET, {"sub": str(auth_user_id), "email": profile["email"]}
     )
     return {"Authorization": f"Bearer {token}"}, profile
 
@@ -164,6 +163,27 @@ def test_cost_api_derives_date_and_inputs_from_cargo_and_forecast():
         assert call["vessel_class_id"] == "PANAMAX"
         assert call["freight_unit"] is FreightUnit.USD_PER_MT
         assert call["cost_reference_date"] == date(2025, 12, 31)
+    finally:
+        user_repository.clear_mock_profiles()
+
+
+def test_cost_api_uses_first_chronological_forecast_rate_server_side():
+    headers, profile = _authenticated_headers()
+    import app.api.v1.cost as cost_api
+
+    try:
+        cargo_id, forecast_id = _configure_context(cost_api, profile)
+        cost_api.cost_service.forecast_repo.get_forecast_points = lambda _id: [
+            {"forecast_date": "2026-02-01", "central_value": "17.5", "unit": "USD_PER_MT"},
+            {"forecast_date": "2026-01-01", "central_value": "15.25", "unit": "USD_PER_MT"},
+        ]
+        response = client.post(
+            "/api/v1/cost",
+            json={**_payload(cargo_id, forecast_id), "use_forecast_central_rate": True},
+            headers=headers,
+        )
+        assert response.status_code == 200
+        assert cost_api.cost_service.engine.call["freight_rate_override"] == Decimal("15.25")
     finally:
         user_repository.clear_mock_profiles()
 

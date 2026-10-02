@@ -90,16 +90,38 @@ def test_complete_e2e_chartering_decision_workflow(
     class ScenarioDB:
         def __init__(self):
             self.rows = []
+            from pathlib import Path
+            fixture_dir = Path(__file__).resolve().parents[2] / "data" / "reference"
+            self.defaults = [
+                {
+                    "scenario_id": item.scenario_id.value,
+                    "scenario_name": item.scenario_name,
+                    "freight_change_pct": str(item.freight_change_pct),
+                    "fuel_change_pct": str(item.fuel_change_pct),
+                    "delay_hours": str(item.delay_hours),
+                    "port_congestion_level": item.port_congestion_level.value,
+                    "description": item.description,
+                }
+                for item in ScenarioRepository(reference_data_dir=fixture_dir).get_scenario_defaults()
+            ]
 
         def table(self, _table_name):
             database = self
 
             class Table:
+                selected = False
+
+                def select(self, *_columns):
+                    self.selected = True
+                    return self
+
                 def insert(self, row):
                     self.row = row
                     return self
 
                 def execute(self):
+                    if self.selected:
+                        return SimpleNamespace(data=database.defaults)
                     database.rows.append(self.row)
                     return SimpleNamespace(data=[self.row])
 

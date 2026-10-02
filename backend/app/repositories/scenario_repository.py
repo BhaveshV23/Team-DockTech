@@ -24,6 +24,7 @@ class ScenarioRepository:
 
     def __init__(self, db_client: Any = None, reference_data_dir: Path | None = None):
         self.db_client = db_client
+        self.use_supabase_reference_data = db_client is None and reference_data_dir is None
         self.supabase_url = settings.SUPABASE_URL
         self.service_role_key = settings.SUPABASE_SERVICE_ROLE_KEY
         self.reference_data_dir = reference_data_dir or (
@@ -31,14 +32,27 @@ class ScenarioRepository:
         )
 
     def get_scenario_defaults(self) -> List[ScenarioDefault]:
+        if self.use_supabase_reference_data:
+            from backend.app.repositories.reference_repository import reference_repository
+            try:
+                rows = reference_repository.get_rows("scenario_defaults", {"order": "scenario_id.asc"})
+                return [self._default_from_row(row) for row in rows]
+            except Exception as exc:
+                raise ScenarioStorageUnavailable("Canonical scenario defaults are unavailable") from exc
         if self.db_client is not None:
             try:
                 response = self.db_client.table("scenario_defaults").select("*").execute()
-                if response.data:
-                    return [self._default_from_row(row) for row in response.data]
-            except Exception:
-                # The version-controlled seed file is the documented defaults fallback.
-                pass
+                if not response.data:
+                    raise ScenarioStorageUnavailable(
+                        "Canonical scenario defaults are unavailable"
+                    )
+                return [self._default_from_row(row) for row in response.data]
+            except ScenarioStorageUnavailable:
+                raise
+            except Exception as exc:
+                raise ScenarioStorageUnavailable(
+                    "Canonical scenario defaults are unavailable"
+                ) from exc
         path = self.reference_data_dir / "scenario_defaults.csv"
         if not path.exists():
             raise ScenarioStorageUnavailable("Canonical scenario defaults are unavailable")

@@ -25,6 +25,7 @@ def test_training_writes_split_metadata_selection_and_loadable_artifact(tmp_path
     artifact_path = tmp_path / "models" / "forecast.joblib"
     metadata_path = tmp_path / "models" / "metadata.json"
     metrics_path = tmp_path / "models" / "evaluation.csv"
+    model_card_path = tmp_path / "models" / "MODEL_CARD.md"
     pd.DataFrame(rows).to_csv(data_path, index=False)
     monkeypatch.setattr(sys, "argv", [
         "ml.train",
@@ -32,6 +33,7 @@ def test_training_writes_split_metadata_selection_and_loadable_artifact(tmp_path
         "--artifact", str(artifact_path),
         "--metadata", str(metadata_path),
         "--metrics", str(metrics_path),
+        "--model-card", str(model_card_path),
     ])
 
     main()
@@ -46,8 +48,11 @@ def test_training_writes_split_metadata_selection_and_loadable_artifact(tmp_path
 
     assert metadata["model_name"]
     assert metadata["model_version"] == "docktech-ridge-ar-v1"
-    assert metadata["training_period"] == {"start": "2024-01-01", "end": "2025-06-30"}
-    assert metadata["evaluation_period"] == {"start": "2025-07-01", "end": "2025-12-31"}
+    assert metadata["initial_training_period"] == {"start": "2024-01-01", "end": "2025-04-30"}
+    assert metadata["validation_period"] == {"start": "2025-05-01", "end": "2025-08-31"}
+    assert metadata["training_period"] == {"start": "2024-01-01", "end": "2025-08-31"}
+    assert metadata["final_test_period"] == {"start": "2025-09-01", "end": "2025-12-31"}
+    assert metadata["evaluation_period"] == metadata["final_test_period"]
     assert metadata["series"] == [{
         "route_id": "ROUTE", "vessel_class_id": "VESSEL", "freight_unit": "USD_PER_MT",
     }]
@@ -61,7 +66,8 @@ def test_training_writes_split_metadata_selection_and_loadable_artifact(tmp_path
     assert set(metadata["metrics_summary"]["improved_mean"]) == required_metric_names
     assert set(metadata["metrics_summary"]["selected_mean"]) == required_metric_names
     assert set(metrics["model"]) == {"seasonal_naive_7d", "ridge_autoregression"}
-    series_metrics = metrics.set_index("model")
+    assert set(metrics["evaluation_period"]) == {"validation", "final_test"}
+    series_metrics = metrics[metrics.evaluation_period == "validation"].set_index("model")
     expected = min(
         ("seasonal_naive_7d", "ridge_autoregression"),
         key=lambda name: (series_metrics.loc[name, "mae"], name != "seasonal_naive_7d"),
@@ -69,3 +75,7 @@ def test_training_writes_split_metadata_selection_and_loadable_artifact(tmp_path
     assert metadata["selected_model_by_series"][series_key] == expected
     assert series_key in artifact
     assert metadata["uncertainty"]
+    assert metadata["selection_procedure"].find("Final-test metrics") > 0
+    assert set(metadata["validation_metrics_summary"]) == {"baseline_mean", "improved_mean", "selected_mean"}
+    assert set(metadata["final_test_metrics_summary"]) == {"baseline_mean", "improved_mean", "selected_mean"}
+    assert "Independent final test period" in model_card_path.read_text(encoding="utf-8")

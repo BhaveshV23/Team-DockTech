@@ -28,18 +28,33 @@ class SupabaseAuthVerifier:
     def anon_key(self) -> str:
         return settings.SUPABASE_ANON_KEY
 
+    @property
+    def jwt_issuer(self) -> str:
+        """Return the issuer URL for tokens from this configured Supabase project."""
+        if not self.supabase_url:
+            return ""
+        return f"{self.supabase_url.rstrip('/')}/auth/v1"
+
     def verify_token(self, token: str) -> Dict[str, Any]:
         if not token or not token.strip():
             raise SupabaseAuthError("Missing authorization token", status_code=401)
 
         # 1. Local HMAC Signature Verification via SUPABASE_JWT_SECRET if configured
         if self.jwt_secret:
+            issuer = self.jwt_issuer
+            if not issuer:
+                raise SupabaseAuthError(
+                    "Authentication system unconfigured: missing Supabase URL for JWT issuer verification",
+                    status_code=401,
+                )
             try:
                 payload = jwt.decode(
                     token,
                     self.jwt_secret,
                     algorithms=["HS256"],
-                    options={"verify_aud": False},
+                    audience="authenticated",
+                    issuer=issuer,
+                    options={"require": ["exp", "sub", "iss", "aud"]},
                 )
                 auth_user_id = payload.get("sub")
                 if not auth_user_id:

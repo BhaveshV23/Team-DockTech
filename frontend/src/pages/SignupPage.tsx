@@ -148,11 +148,12 @@ function SignupPage() {
             });
             if (error) throw new Error(error.message);
             if (!data.session) {
-                setNotice("Account created. Confirm your email before signing in. DockTech access also requires an application profile provisioned by an administrator.");
+                setNotice("Account created. Confirm your email before signing in. Your DockTech profile will be created when you sign in.");
                 return;
             }
 
-            const profile = await apiRequest<AuthProfile>("/api/v1/auth/me", {
+            const profile = await apiRequest<AuthProfile>("/api/v1/auth/provision", {
+                method: "POST",
                 headers: { Authorization: `Bearer ${data.session.access_token}` },
             });
             setAuthenticatedProfile(profile);

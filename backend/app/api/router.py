@@ -6,6 +6,9 @@ from app.api.v1 import (
     forecast,
     feasibility,
     cost,
+    provenance,
+)
+from backend.app.api.v1 import (
     scenarios,
     recommendations,
 )
@@ -18,6 +21,7 @@ api_router.include_router(forecast.router)
 api_router.include_router(feasibility.router)
 
 api_router.include_router(cost.router)
+api_router.include_router(provenance.router)
 
 api_router.include_router(scenarios.router)
 api_router.include_router(recommendations.router)

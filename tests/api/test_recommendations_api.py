@@ -13,9 +13,9 @@ if backend_path not in sys.path:
     sys.path.insert(0, backend_path)
 
 from backend.app.core.dependencies import get_current_user_profile
-from backend.app.domain.constants import ContractStrategy, MarketEntryAction, RiskLevel
+from backend.app.domain.constants import ContractStrategy, FeasibilityStatus, MarketEntryAction, RiskLevel
 from backend.app.domain.recommendation.errors import NoFeasibleVesselError
-from backend.app.domain.recommendation.models import RecommendationConfidence, RecommendationResult
+from backend.app.domain.recommendation.models import CandidateComparison, RecommendationConfidence, RecommendationResult
 from backend.app.main import app
 from backend.app.schemas.auth import UserProfileResponse
 from backend.app.api.v1.recommendations import get_recommendation_service
@@ -41,6 +41,12 @@ def _result(cargo_id):
         rationale="Lowest cost per MT with acceptable risk.", assumptions="Canonical forecast evidence.",
         created_at=datetime(2026, 1, 2, tzinfo=timezone.utc), trend="FLAT",
         forecast_uncertainty=(Decimal("1"), Decimal("2"), Decimal("3")), required_voyages=1,
+        candidate_comparisons=(CandidateComparison(
+            vessel_class_id="PANAMAX", feasibility_status=FeasibilityStatus.FEASIBLE,
+            expected_freight_cost=Decimal("1200.25"), expected_total_cost=Decimal("1500.50"),
+            effective_cost_per_mt=Decimal("1.5"), estimated_turnaround_hours=Decimal("72"),
+            required_voyages=1, risk_level=RiskLevel.MEDIUM,
+        ),),
     )
 
 
@@ -79,7 +85,14 @@ def test_post_recommendation_returns_all_frozen_fields_and_delegates():
         "recommendation_id", "cargo_request_id", "forecast_run_id", "recommended_vessel_class_id",
         "market_entry_action", "contract_strategy", "expected_freight_cost", "expected_total_cost",
         "estimated_turnaround_hours", "risk_level", "confidence", "rationale", "assumptions", "created_at",
+        "candidate_comparisons",
     }
+    assert data["candidate_comparisons"] == [{
+        "vessel_class_id": "PANAMAX", "feasibility_status": "FEASIBLE",
+        "expected_freight_cost": "1200.25", "expected_total_cost": "1500.50",
+        "effective_cost_per_mt": "1.5", "estimated_turnaround_hours": "72",
+        "required_voyages": 1, "risk_level": "MEDIUM",
+    }]
     assert data["market_entry_action"] == "FIX_NOW"
     assert data["contract_strategy"] == "SPOT"
     assert data["cargo_request_id"] == str(cargo_id)

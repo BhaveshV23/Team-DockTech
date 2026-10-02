@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
+import DataProvenance from "../components/DataProvenance";
 import { useCargoRequest } from "../hooks/useCargoRequest";
 import { apiRequest } from "../services/api";
 import type { CargoRequestResponse } from "../types/cargo";
@@ -155,6 +156,8 @@ function VesselOptions() {
                     </div>
                 </header>
 
+                <DataProvenance />
+
                 {pageState.status === "empty" || noActiveCargo ? (
                     <section className="vessel-table-card">
                         <div className="vessel-empty-state" role="status">
@@ -224,7 +227,7 @@ function VesselOptions() {
                                         <tbody>
                                             {options.map(({ vessel, feasibility }) => (
                                                 <tr key={vessel.vessel_class_id}>
-                                                    <td>{vessel.vessel_class_name}<br /><small>{vessel.vessel_class_id}</small></td>
+                                                    <td>{vessel.vessel_class_name}<br /><small>{vessel.vessel_class_id}</small><br /><small>{vessel.source} · {vessel.data_type}</small></td>
                                                     <td>{feasibility.status}</td>
                                                     <td>{feasibility.rejection_reason || "—"}{feasibility.rejection_reason_code && <><br /><small>{feasibility.rejection_reason_code}</small></>}</td>
                                                     <td>{vessel.cargo_capacity_mt.toLocaleString()} MT</td>

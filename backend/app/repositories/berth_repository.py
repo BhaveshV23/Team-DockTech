@@ -1,6 +1,6 @@
 """
 DockTech V1 — Berth Repository
-Loads and queries canonical berth data from data/reference/berths.csv.
+Loads and queries canonical berth data from Supabase at runtime, or an explicit CSV fixture.
 Sources: DATA_DICTIONARY.md, ARCHITECTURE.md
 """
 
@@ -16,17 +16,23 @@ from backend.app.repositories.base import _find_data_reference_dir, load_csv_as_
 class BerthRepository:
     """
     Repository for canonical Berth reference data.
-    Reads from data/reference/berths.csv — the single source of truth.
+    Reads from Supabase unless a CSV data directory is explicitly supplied.
     Berths are the authoritative operational layer for feasibility.
     """
 
     def __init__(self, data_dir: Optional[Path] = None) -> None:
+        self._use_supabase = data_dir is None
         self._data_dir = data_dir or _find_data_reference_dir()
         self._berths: Optional[Dict[str, Berth]] = None
 
     def _load(self) -> Dict[str, Berth]:
         if self._berths is not None:
             return self._berths
+        if self._use_supabase:
+            from backend.app.repositories.reference_repository import reference_repository
+            self._berths = {berth.berth_id: berth for berth in reference_repository.get_berth_entities_for_all_ports()}
+            return self._berths
+
         rows = load_csv_as_dicts(self._data_dir / "berths.csv")
         self._berths = {}
         for row in rows:

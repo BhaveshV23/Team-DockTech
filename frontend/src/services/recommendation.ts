@@ -34,6 +34,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isRecommendationResult(value: unknown): value is RecommendationResult {
     if (!isRecord(value)) return false;
+    const comparisons = value.candidate_comparisons;
+    const comparisonsValid = comparisons === undefined || (
+        Array.isArray(comparisons) && comparisons.every((item) => {
+            if (!isRecord(item)) return false;
+            const isDecimal = (field: unknown) => typeof field === "number" || typeof field === "string";
+            return typeof item.vessel_class_id === "string" &&
+                (item.feasibility_status === "FEASIBLE" || item.feasibility_status === "INFEASIBLE") &&
+                isDecimal(item.expected_freight_cost) && isDecimal(item.expected_total_cost) &&
+                isDecimal(item.effective_cost_per_mt) && isDecimal(item.estimated_turnaround_hours) &&
+                typeof item.required_voyages === "number" &&
+                (item.risk_level === "LOW" || item.risk_level === "MEDIUM" || item.risk_level === "HIGH");
+        })
+    );
     return typeof value.recommendation_id === "string" &&
         typeof value.cargo_request_id === "string" &&
         typeof value.forecast_run_id === "string" &&
@@ -47,7 +60,7 @@ function isRecommendationResult(value: unknown): value is RecommendationResult {
         (value.confidence === "LOW" || value.confidence === "MEDIUM" || value.confidence === "HIGH") &&
         typeof value.rationale === "string" &&
         typeof value.assumptions === "string" &&
-        typeof value.created_at === "string";
+        typeof value.created_at === "string" && comparisonsValid;
 }
 
 export function storeRecommendation(
