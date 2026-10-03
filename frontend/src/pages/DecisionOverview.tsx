@@ -9,7 +9,7 @@ import {
 import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import { useCargoRequest } from "../hooks/useCargoRequest";
-import { apiRequest, useAuthenticatedUser } from "../services/api";
+import { apiRequest, startPageLoadTiming, useAuthenticatedUser } from "../services/api";
 import {
     createRecommendation,
     getStoredRecommendation,
@@ -61,6 +61,7 @@ function DecisionOverview() {
         if (!cargoRequestId || !userId) return;
 
         let active = true;
+        const finishTiming = startPageLoadTiming("Decision Overview");
         const key = `${userId}:${cargoRequestId}`;
         let promise = operationRef.current?.key === key
             ? operationRef.current.promise
@@ -107,7 +108,7 @@ function DecisionOverview() {
                         : "Unable to load the cargo decision.",
                 });
             }
-        });
+        }).finally(finishTiming);
 
         return () => { active = false; };
     }, [cargoRequestId, retryCount, userId]);

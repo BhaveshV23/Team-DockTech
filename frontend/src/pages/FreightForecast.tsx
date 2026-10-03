@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import DataProvenance from "../components/DataProvenance";
 import { useCargoRequest } from "../hooks/useCargoRequest";
-import { apiRequest, useAuthenticatedUser } from "../services/api";
+import { apiRequest, startPageLoadTiming, useAuthenticatedUser } from "../services/api";
 import type { CargoRequestResponse } from "../types/cargo";
 import type { FreightHistoryResponse, ForecastHorizon, ForecastRequest, ForecastRunResponse } from "../types/forecast";
 import "./FreightForecast.css";
@@ -127,6 +127,7 @@ function FreightForecast() {
     const forecastResultsRef = useRef(new Map<string, ForecastRunResponse>());
     const historyRequestsRef = useRef(new Map<string, Promise<FreightHistoryResponse>>());
     const historyResultsRef = useRef(new Map<string, FreightHistoryResponse>());
+    const pageLoadFinishRef = useRef<(() => void) | null>(null);
 
     useEffect(() => {
         if (!cargoRequestId || !cargoUserId) {
@@ -135,6 +136,9 @@ function FreightForecast() {
         }
 
         let active = true;
+        if (!pageLoadFinishRef.current) {
+            pageLoadFinishRef.current = startPageLoadTiming("Freight Forecast");
+        }
         forecastRequestRef.current = null;
         const loadContext = async () => {
             const [cargo, routes, vessels] = await Promise.all([
@@ -176,7 +180,18 @@ function FreightForecast() {
         return () => { active = false; };
     }, [cargoRequestId, cargoUserId, retryCount]);
 
+    useEffect(() => {
+        const contextFailedOrEmpty = context.status === "error" || context.status === "empty";
+        const supportingDataFailed = historyState.status === "error" || forecastState.status === "error";
+        const fullyLoaded = context.status === "ready" && historyState.status === "ready" && forecastState.status === "ready";
+        if (contextFailedOrEmpty || supportingDataFailed || fullyLoaded) {
+            pageLoadFinishRef.current?.();
+            pageLoadFinishRef.current = null;
+        }
+    }, [context, forecastState, historyState]);
+
     const retryContext = () => {
+        pageLoadFinishRef.current = null;
         setContext({ status: "loading" });
         setRetryCount((count) => count + 1);
     };

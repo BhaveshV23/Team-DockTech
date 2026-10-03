@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import DataProvenance from "../components/DataProvenance";
 import { useCargoRequest } from "../hooks/useCargoRequest";
-import { apiRequest, useAuthenticatedUser } from "../services/api";
+import { apiRequest, startPageLoadTiming, useAuthenticatedUser } from "../services/api";
 import {
     createRecommendation,
     getStoredRecommendation,
@@ -113,6 +113,7 @@ function ScenariosRisk() {
     useEffect(() => {
         if (!cargoRequestId || !cargoUserId || !userId) return;
         let active = true;
+        const finishTiming = startPageLoadTiming("Scenarios & Risk");
         const loadScenarios = async (): Promise<PageState> => {
             const key = `${userId}:${cargoRequestId}`;
             const cachedRecommendation = getStoredRecommendation(userId, cargoRequestId);
@@ -192,7 +193,7 @@ function ScenariosRisk() {
             }
         }).catch((error: unknown) => {
             if (active) setPageState({ status: "error", message: error instanceof Error ? error.message : "Unable to load scenario results." });
-        });
+        }).finally(finishTiming);
         return () => { active = false; };
     }, [cargoRequestId, cargoUserId, retryCount, userId]);
 

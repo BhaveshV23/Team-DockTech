@@ -11,6 +11,7 @@ from uuid import UUID
 import httpx
 
 from backend.app.core.config import settings
+from backend.app.core.timing import log_timing, timed_stage, timing_start
 from backend.app.domain.constants import ContractStrategy, MarketEntryAction, RiskLevel
 from backend.app.domain.recommendation.models import RecommendationConfidence, RecommendationResult
 
@@ -72,6 +73,7 @@ class RecommendationRepository:
 
     def _get_one(self, table: str, params: dict[str, str], label: str) -> dict[str, Any]:
         url, headers = self._configuration(table)
+        started_at = timing_start()
         try:
             with httpx.Client(timeout=10.0) as client:
                 response = client.get(url, headers=headers, params={**params, "select": "*", "limit": "2"})
@@ -84,6 +86,8 @@ class RecommendationRepository:
             raise
         except Exception as exc:
             raise RecommendationPersistenceError("Recommendation provenance lookup failed") from exc
+        finally:
+            log_timing("recommendation.repository_lookup", started_at, table=table)
 
     @staticmethod
     def _uuid(value: Any, field: str) -> UUID:
@@ -240,8 +244,9 @@ class RecommendationRepository:
             "Prefer": "return=representation",
         }
         try:
-            with httpx.Client(timeout=10.0) as client:
-                response = client.post(url, headers=headers, json=record)
+            with timed_stage("recommendation.repository_insert"):
+                with httpx.Client(timeout=10.0) as client:
+                    response = client.post(url, headers=headers, json=record)
             self._check_response(response, "persistence")
             return self._verify_inserted(response.json(parse_float=Decimal), record)
         except RecommendationPersistenceError:

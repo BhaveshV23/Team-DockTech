@@ -1,9 +1,9 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";
 
-import { apiRequest, getAuthConfigurationError, setAuthenticatedProfile, supabase } from "./services/api";
+import { apiRequest, getAuthConfigurationError, setAuthenticatedProfile, setCurrentAccessToken, supabase } from "./services/api";
 import type { AuthProfile } from "./services/api";
 import Login from "./pages/Login";
 import SignupPage from "./pages/SignupPage";
@@ -16,6 +16,7 @@ import CostAnalysis from "./pages/CostAnalysis";
 import ScenariosRisk from "./pages/ScenariosRisk";
 import Recommendation from "./pages/Recommendation";
 import DecisionReport from "./pages/DecisionReport";
+import AdminUserRoles from "./pages/AdminUserRoles";
 
 type AuthState = {
   status: "loading" | "authenticated" | "unauthenticated";
@@ -36,36 +37,75 @@ function ProtectedRoutes() {
 }
 
 function AuthProvider({ children }: { children: ReactNode }) {
-  const [auth, setAuth] = useState<AuthState>({
+  const initialAuth: AuthState = {
     status: supabase ? "loading" : "unauthenticated",
-  });
+  };
+  const [auth, setAuth] = useState<AuthState>(initialAuth);
+  const authRef = useRef<AuthState>(initialAuth);
+  const authUserIdRef = useRef<string | null>(null);
+
+  const updateAuth = (nextAuth: AuthState) => {
+    authRef.current = nextAuth;
+    setAuth(nextAuth);
+  };
 
   useEffect(() => {
     let active = true;
-    let validation = 0;
+    const resolveSession = async (event: string, session: Session | null) => {
+      setCurrentAccessToken(session?.access_token ?? null);
 
-    const resolveSession = async (session: Session | null) => {
-      const currentValidation = ++validation;
       if (!session) {
+        authUserIdRef.current = null;
         setAuthenticatedProfile(null);
-        if (active) setAuth({ status: "unauthenticated" });
+        if (active && authRef.current.status !== "unauthenticated") {
+          updateAuth({ status: "unauthenticated" });
+        }
         return;
       }
 
-      if (active) setAuth({ status: "loading" });
+      const authUserId = session.user.id;
+      const sameIdentity = authUserIdRef.current === authUserId;
+
+      // Refreshing the access token does not change who is signed in. Keep the
+      // current profile and UI while refreshing it in the background.
+      if (event === "TOKEN_REFRESHED") {
+        if (sameIdentity && authRef.current.status === "authenticated") {
+          void apiRequest<AuthProfile>("/api/v1/auth/provision", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${session.access_token}` },
+          }).then((profile) => {
+            if (active && authUserIdRef.current === authUserId) {
+              setAuthenticatedProfile(profile);
+            }
+          }).catch(() => {
+            // A transient profile refresh failure must not interrupt a valid session.
+          });
+        }
+        return;
+      }
+
+      if (sameIdentity && authRef.current.status === "authenticated") return;
+
+      authUserIdRef.current = authUserId;
+      setAuthenticatedProfile(null);
+      if (active && authRef.current.status !== "loading") {
+        updateAuth({ status: "loading" });
+      }
+
       try {
         const profile = await apiRequest<AuthProfile>("/api/v1/auth/provision", {
           method: "POST",
           headers: { Authorization: `Bearer ${session.access_token}` },
         });
-        if (active && currentValidation === validation) {
+        if (active && authUserIdRef.current === authUserId) {
           setAuthenticatedProfile(profile);
-          setAuth({ status: "authenticated" });
+          updateAuth({ status: "authenticated" });
         }
       } catch {
-        if (active && currentValidation === validation) {
+        if (active && authUserIdRef.current === authUserId) {
           setAuthenticatedProfile(null);
-          setAuth({ status: "unauthenticated" });
+          authUserIdRef.current = null;
+          updateAuth({ status: "unauthenticated" });
         }
       }
     };
@@ -75,16 +115,8 @@ function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => { void resolveSession(session); },
+      (event, session) => { void resolveSession(event, session); },
     );
-    void supabase.auth.getSession().then(({ data, error }) => {
-      if (!active) return;
-      if (error) {
-        setAuthenticatedProfile(null);
-        setAuth({ status: "unauthenticated" });
-      }
-      else void resolveSession(data.session);
-    });
 
     return () => {
       active = false;
@@ -113,6 +145,7 @@ function App() {
             <Route path="/scenarios-risk" element={<ScenariosRisk />} />
             <Route path="/recommendation" element={<Recommendation />} />
             <Route path="/decision-report" element={<DecisionReport />} />
+            <Route path="/admin/users" element={<AdminUserRoles />} />
           </Route>
           <Route path="/" element={<Navigate to={configurationError ? "/login" : "/dashboard"} replace />} />
           <Route path="*" element={<Navigate to="/login" replace />} />

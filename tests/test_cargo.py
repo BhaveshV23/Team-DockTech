@@ -62,6 +62,66 @@ def test_unauthenticated_cargo_request_create_returns_401():
     assert "Missing authorization token" in response.json()["detail"]
 
 
+def test_viewer_cannot_create_cargo_even_with_client_supplied_privileges(fake_supabase_cargo_table):
+    rows, _ = fake_supabase_cargo_table
+    token, _ = helper_create_test_user(role="VIEWER")
+    payload = {
+        "role": "ADMINISTRATOR",
+        "user_id": str(uuid4()),
+        "auth_user_id": str(uuid4()),
+        "commodity": "THERMAL_COAL",
+        "cargo_volume_mt": 75000.0,
+        "origin_port_id": "NEWCASTLE",
+        "destination_port_id": "PARADIP",
+        "earliest_delivery_date": "2026-10-01",
+        "latest_delivery_date": "2026-10-15",
+        "contract_horizon": "SPOT",
+    }
+    try:
+        response = client.post(
+            "/api/v1/cargo-requests",
+            headers={"Authorization": f"Bearer {token}"},
+            json=payload,
+        )
+        assert response.status_code == 403
+        assert rows == {}
+    finally:
+        user_repository.clear_mock_profiles()
+
+
+@pytest.mark.parametrize("role", ["PLANNER", "MANAGER", "ADMINISTRATOR"])
+def test_authorized_roles_create_cargo_owned_by_authenticated_profile(
+    fake_supabase_cargo_table, role,
+):
+    rows, _ = fake_supabase_cargo_table
+    token, profile = helper_create_test_user(role=role)
+    payload = {
+        "role": "VIEWER",
+        "user_id": str(uuid4()),
+        "auth_user_id": str(uuid4()),
+        "commodity": "THERMAL_COAL",
+        "cargo_volume_mt": 75000.0,
+        "origin_port_id": "NEWCASTLE",
+        "destination_port_id": "PARADIP",
+        "earliest_delivery_date": "2026-10-01",
+        "latest_delivery_date": "2026-10-15",
+        "contract_horizon": "SPOT",
+    }
+    try:
+        response = client.post(
+            "/api/v1/cargo-requests",
+            headers={"Authorization": f"Bearer {token}"},
+            json=payload,
+        )
+        assert response.status_code == 201, response.text
+        cargo = response.json()
+        assert cargo["user_id"] == profile["user_id"]
+        assert cargo["user_id"] != payload["user_id"]
+        assert rows[cargo["cargo_request_id"]]["user_id"] == profile["user_id"]
+    finally:
+        user_repository.clear_mock_profiles()
+
+
 def test_invalid_cargo_input_negative_volume():
     """Verify negative volume triggers validation error (422)."""
     token, _ = helper_create_test_user()

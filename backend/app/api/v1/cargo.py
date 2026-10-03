@@ -1,7 +1,7 @@
 from typing import List
 from uuid import UUID
 from fastapi import APIRouter, Depends, status
-from app.core.dependencies import get_current_user_profile
+from app.core.dependencies import get_current_user_profile, require_roles
 from app.schemas.auth import UserProfileResponse
 from app.schemas.cargo_request import CargoRequestCreate, CargoRequestResponse
 from app.services.cargo_service import cargo_service
@@ -18,7 +18,9 @@ router = APIRouter(prefix="/cargo-requests", tags=["Cargo Requests"])
 )
 def create_cargo_request(
     payload: CargoRequestCreate,
-    current_user: UserProfileResponse = Depends(get_current_user_profile),
+    current_user: UserProfileResponse = Depends(
+        require_roles("PLANNER", "MANAGER", "ADMINISTRATOR")
+    ),
 ) -> CargoRequestResponse:
     """Create a new cargo request associated with the authenticated user."""
     return cargo_service.create_cargo_request(payload, current_user)

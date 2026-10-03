@@ -7,6 +7,8 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 let rememberSession = true;
+let currentAccessToken: string | null = null;
+const inFlightProvisionRequests = new Map<string, Promise<unknown>>();
 
 const authStorage = {
     getItem(key: string) {
@@ -95,6 +97,29 @@ export function setAuthenticatedProfile(profile: AuthProfile | null) {
     userListeners.forEach((listener) => listener());
 }
 
+export function setCurrentAccessToken(accessToken: string | null) {
+    currentAccessToken = accessToken;
+}
+
+export function startPageLoadTiming(page: string, stage = "page load") {
+    if (!import.meta.env.DEV) return () => undefined;
+    const startedAt = performance.now();
+    const startedAtIso = new Date().toISOString();
+    console.debug("[DockTech timing] page load start", { page, stage, startedAt: startedAtIso });
+    let finished = false;
+    return () => {
+        if (finished) return;
+        finished = true;
+        console.debug("[DockTech timing] page load end", {
+            page,
+            stage,
+            startedAt: startedAtIso,
+            endedAt: new Date().toISOString(),
+            durationMs: Number((performance.now() - startedAt).toFixed(1)),
+        });
+    };
+}
+
 export function useAuthenticatedUser() {
     return useSyncExternalStore(subscribeToUser, getUserSnapshot, () => null);
 }
@@ -143,55 +168,107 @@ export async function apiRequest<T>(
         headers.set("Content-Type", "application/json");
     }
 
-    if (!headers.has("Authorization") && supabase) {
-        const { data, error } = await supabase.auth.getSession();
-        if (error) throw new Error(error.message);
-        if (data.session?.access_token) {
-            headers.set("Authorization", `Bearer ${data.session.access_token}`);
-        }
-    }
-
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-        ...options,
-        headers,
-    });
-
-    if (!response.ok) {
-        let message = `Request failed with status ${response.status}`;
-        let code: string | null = null;
-        try {
-            const errorData = await response.json();
-            const detail = errorData?.detail;
-            if (typeof detail === "string") {
-                message = detail;
-            } else if (detail && typeof detail === "object" && !Array.isArray(detail)) {
-                if (typeof detail.code === "string") code = detail.code;
-                if (typeof detail.message === "string") message = detail.message;
-            } else if (Array.isArray(detail)) {
-                const validationMessages = detail
-                    .map((item: unknown) =>
-                        item && typeof item === "object" && "msg" in item && typeof item.msg === "string"
-                            ? item.msg
-                            : null
-                    )
-                    .filter((item): item is string => item !== null);
-                if (validationMessages.length > 0) {
-                    message = validationMessages.join("; ");
-                }
-            } else if (typeof errorData?.message === "string") {
-                message = errorData.message;
+    if (!headers.has("Authorization")) {
+        if (currentAccessToken) {
+            headers.set("Authorization", `Bearer ${currentAccessToken}`);
+        } else if (supabase) {
+            const { data, error } = await supabase.auth.getSession();
+            if (error) throw new Error(error.message);
+            if (data.session?.access_token) {
+                headers.set("Authorization", `Bearer ${data.session.access_token}`);
+                currentAccessToken = data.session.access_token;
             }
-        } catch {
-            // Keep the default HTTP error message.
         }
-        throw new ApiRequestError(message, response.status, code);
     }
 
-    if (response.status === 204) return undefined as T;
-    return response.json() as Promise<T>;
+    const isProvisionRequest = endpoint === "/api/v1/auth/provision" &&
+        (options.method ?? "GET").toUpperCase() === "POST";
+    const authorization = isProvisionRequest ? headers.get("Authorization") : null;
+    const existingProvisionRequest = authorization
+        ? inFlightProvisionRequests.get(authorization)
+        : undefined;
+    if (existingProvisionRequest) return existingProvisionRequest as Promise<T>;
+
+    const timingEnabled = import.meta.env.DEV;
+    const pageNames: Record<string, string> = {
+        "/decision-overview": "Decision Overview",
+        "/freight-forecast": "Freight Forecast",
+        "/vessel-options": "Vessel Options",
+        "/cost-analysis": "Cost Analysis",
+        "/scenarios-risk": "Scenarios & Risk",
+    };
+    const page = typeof window !== "undefined" ? pageNames[window.location.pathname] : undefined;
+    const requestStartedAt = performance.now();
+    const requestStartedIso = new Date().toISOString();
+    const method = (options.method ?? "GET").toUpperCase();
+    if (timingEnabled && page) {
+        console.debug("[DockTech timing] request start", { page, method, endpoint, startedAt: requestStartedIso });
+    }
+
+    const request = (async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers });
+
+        if (!response.ok) {
+            let message = `Request failed with status ${response.status}`;
+            let code: string | null = null;
+            try {
+                const errorData = await response.json();
+                const detail = errorData?.detail;
+                if (typeof detail === "string") {
+                    message = detail;
+                } else if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+                    if (typeof detail.code === "string") code = detail.code;
+                    if (typeof detail.message === "string") message = detail.message;
+                } else if (Array.isArray(detail)) {
+                    const validationMessages = detail
+                        .map((item: unknown) =>
+                            item && typeof item === "object" && "msg" in item && typeof item.msg === "string"
+                                ? item.msg
+                                : null
+                        )
+                        .filter((item): item is string => item !== null);
+                    if (validationMessages.length > 0) {
+                        message = validationMessages.join("; ");
+                    }
+                } else if (typeof errorData?.message === "string") {
+                    message = errorData.message;
+                }
+            } catch {
+                // Keep the default HTTP error message.
+            }
+            throw new ApiRequestError(message, response.status, code);
+        }
+
+        if (response.status === 204) return undefined as T;
+        return response.json() as Promise<T>;
+      } finally {
+        if (timingEnabled && page) {
+            console.debug("[DockTech timing] request end", {
+                page,
+                method,
+                endpoint,
+                startedAt: requestStartedIso,
+                endedAt: new Date().toISOString(),
+                durationMs: Number((performance.now() - requestStartedAt).toFixed(1)),
+            });
+        }
+      }
+    })();
+
+    if (!authorization) return request;
+    inFlightProvisionRequests.set(authorization, request);
+    try {
+        return await request;
+    } finally {
+        if (inFlightProvisionRequests.get(authorization) === request) {
+            inFlightProvisionRequests.delete(authorization);
+        }
+    }
 }
 
 export async function signOut() {
+    setCurrentAccessToken(null);
     if (!supabase) {
         setAuthenticatedProfile(null);
         return;

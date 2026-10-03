@@ -9,7 +9,7 @@ import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import DataProvenance from "../components/DataProvenance";
 import { useCargoRequest } from "../hooks/useCargoRequest";
-import { apiRequest } from "../services/api";
+import { apiRequest, startPageLoadTiming } from "../services/api";
 import type { CargoRequestResponse } from "../types/cargo";
 import "./VesselOptions.css";
 
@@ -65,6 +65,7 @@ function VesselOptions() {
         if (!cargoRequestId || !cargoUserId) return;
 
         let active = true;
+        const finishTiming = startPageLoadTiming("Vessel Options");
         const loadOptions = async () => {
             const cargo = await apiRequest<CargoRequestResponse>(
                 `/api/v1/cargo-requests/${encodeURIComponent(cargoRequestId)}`,
@@ -117,7 +118,7 @@ function VesselOptions() {
                         : "Unable to load vessel feasibility. Please try again.",
                 });
             }
-        });
+        }).finally(finishTiming);
 
         return () => { active = false; };
     }, [cargoRequestId, cargoUserId, retryCount]);

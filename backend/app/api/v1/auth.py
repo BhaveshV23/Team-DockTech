@@ -1,8 +1,22 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from app.core.dependencies import get_current_authenticated_user, get_current_user_profile
-from backend.app.repositories.user_repository import UserProfileProvisioningError
-from app.schemas.auth import UserProfileResponse
-from backend.app.services.profile_service import ProfileProvisioningService, profile_provisioning_service
+from app.core.dependencies import (
+    get_current_authenticated_user,
+    get_current_user_profile,
+    require_roles,
+)
+from backend.app.repositories.user_repository import (
+    UserProfileNotFoundError,
+    UserProfileProvisioningError,
+    UserProfileStorageError,
+)
+from app.schemas.auth import RoleUpdateRequest, UserProfileResponse, UserProfileSummary
+from backend.app.services.profile_service import (
+    ProfileProvisioningService,
+    ProfileSelfRoleAssignmentError,
+    profile_provisioning_service,
+)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -45,3 +59,53 @@ def get_current_user_me(
 ) -> UserProfileResponse:
     """Return the application profile for the authenticated request."""
     return profile
+
+
+@router.get(
+    "/users",
+    response_model=list[UserProfileSummary],
+    summary="List User Profiles",
+    description="List user profiles for administrator role-management workflows.",
+)
+def list_user_profiles(
+    _current_user: UserProfileResponse = Depends(require_roles("ADMINISTRATOR")),
+    service: ProfileProvisioningService = Depends(get_profile_provisioning_service),
+) -> list[UserProfileSummary]:
+    try:
+        profiles = service.list_user_profiles()
+    except UserProfileStorageError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Application profile storage is unavailable",
+        ) from exc
+    return [UserProfileSummary.model_validate(profile) for profile in profiles]
+
+
+@router.patch(
+    "/users/{user_id}/role",
+    response_model=UserProfileResponse,
+    summary="Assign Application Role",
+    description="Change another user's application role; administrator access required.",
+)
+def assign_user_role(
+    user_id: UUID,
+    payload: RoleUpdateRequest,
+    current_user: UserProfileResponse = Depends(require_roles("ADMINISTRATOR")),
+    service: ProfileProvisioningService = Depends(get_profile_provisioning_service),
+) -> UserProfileResponse:
+    try:
+        profile = service.assign_role(
+            target_user_id=user_id,
+            role=payload.role,
+            caller_profile=current_user,
+        )
+    except ProfileSelfRoleAssignmentError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except UserProfileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User profile not found") from exc
+    except UserProfileStorageError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Application profile role update is unavailable",
+        ) from exc
+    return UserProfileResponse.model_validate(profile)

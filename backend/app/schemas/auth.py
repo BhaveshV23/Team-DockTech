@@ -21,3 +21,18 @@ class UserProfileResponse(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class UserProfileSummary(BaseModel):
+    user_id: UUID
+    display_name: str
+    email: str
+    role: UserRole
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RoleUpdateRequest(BaseModel):
+    role: UserRole
+
+    model_config = ConfigDict(extra="forbid")

@@ -3,6 +3,7 @@ import {
     BarChart3,
     FileText,
     LogOut,
+    ShieldCheck,
     Ship,
     TrendingUp,
 } from "lucide-react";
@@ -22,7 +23,8 @@ type SidebarProps = {
     | "cost-analysis"
     | "scenarios-risk"
     | "recommendation"
-    | "decision-report";
+    | "decision-report"
+    | "admin-users";
 };
 
 function Sidebar({ activePage }: SidebarProps) {
@@ -134,6 +136,16 @@ function Sidebar({ activePage }: SidebarProps) {
                     <FileText size={18} />
                     <span>Decision Report</span>
                 </Link>
+
+                {user?.role === "ADMINISTRATOR" && (
+                    <Link
+                        to="/admin/users"
+                        className={`app-sidebar-item ${activePage === "admin-users" ? "active" : ""}`}
+                    >
+                        <ShieldCheck size={18} />
+                        <span>User Roles</span>
+                    </Link>
+                )}
 
                 <button
                     type="button"

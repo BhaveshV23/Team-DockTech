@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from uuid import UUID
 import httpx
@@ -6,6 +7,14 @@ from app.core.config import settings
 
 class UserProfileProvisioningError(Exception):
     """Raised when the backend cannot safely create or retrieve a user profile."""
+
+
+class UserProfileNotFoundError(Exception):
+    """Raised when a requested application profile does not exist."""
+
+
+class UserProfileStorageError(Exception):
+    """Raised when profile storage cannot complete an operation safely."""
 
 
 class UserRepository:
@@ -52,6 +61,120 @@ class UserRepository:
                 pass
 
         return None
+
+    def get_by_user_id(self, user_id: UUID) -> Optional[Dict[str, Any]]:
+        user_str = str(user_id)
+        for profile in self._mock_profiles.values():
+            if str(profile.get("user_id")) == user_str:
+                return profile
+
+        if not self.supabase_url or not self.service_role_key:
+            raise UserProfileStorageError("Profile storage is unavailable")
+
+        url = f"{self.supabase_url.rstrip('/')}/rest/v1/user_profiles"
+        headers = {
+            "apikey": self.service_role_key,
+            "Authorization": f"Bearer {self.service_role_key}",
+            "Accept": "application/json",
+        }
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                response = client.get(
+                    url, headers=headers,
+                    params={"user_id": f"eq.{user_str}", "select": "*"},
+                )
+            if response.status_code != 200:
+                raise UserProfileStorageError("Profile storage could not retrieve the target")
+            records = response.json()
+            return records[0] if records else None
+        except UserProfileStorageError:
+            raise
+        except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
+            raise UserProfileStorageError("Profile storage is unavailable") from exc
+
+    def list_profiles(self) -> list[Dict[str, Any]]:
+        summary_fields = ("user_id", "display_name", "email", "role")
+        if self._mock_profiles:
+            return [
+                {field: profile[field] for field in summary_fields}
+                for profile in self._mock_profiles.values()
+            ]
+
+        if not self.supabase_url or not self.service_role_key:
+            raise UserProfileStorageError("Profile storage is unavailable")
+
+        url = f"{self.supabase_url.rstrip('/')}/rest/v1/user_profiles"
+        headers = {
+            "apikey": self.service_role_key,
+            "Authorization": f"Bearer {self.service_role_key}",
+            "Accept": "application/json",
+        }
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                response = client.get(
+                    url,
+                    headers=headers,
+                    params={"select": ",".join(summary_fields)},
+                )
+            if response.status_code != 200:
+                raise UserProfileStorageError("Profile storage could not list users")
+            records = response.json()
+            if not isinstance(records, list):
+                raise UserProfileStorageError("Profile storage returned invalid user data")
+            return [
+                {field: record[field] for field in summary_fields}
+                for record in records
+            ]
+        except UserProfileStorageError:
+            raise
+        except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
+            raise UserProfileStorageError("Profile storage is unavailable") from exc
+
+    def update_role_by_user_id(self, user_id: UUID, role: str) -> Dict[str, Any]:
+        user_str = str(user_id)
+        for profile in self._mock_profiles.values():
+            if str(profile.get("user_id")) == user_str:
+                profile["role"] = role
+                profile["updated_at"] = datetime.now(timezone.utc).isoformat()
+                return profile
+
+        if not self.supabase_url or not self.service_role_key:
+            raise UserProfileStorageError("Profile storage is unavailable")
+
+        url = f"{self.supabase_url.rstrip('/')}/rest/v1/user_profiles"
+        headers = {
+            "apikey": self.service_role_key,
+            "Authorization": f"Bearer {self.service_role_key}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Prefer": "return=representation",
+        }
+        payload = {
+            "role": role,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                response = client.patch(
+                    url,
+                    headers=headers,
+                    params={"user_id": f"eq.{user_str}", "select": "*"},
+                    json=payload,
+                )
+            if response.status_code not in (200, 204):
+                raise UserProfileStorageError("Profile storage rejected the role update")
+            records = response.json() if response.status_code == 200 else []
+            if records:
+                return records[0]
+            if response.status_code == 204:
+                updated = self.get_by_user_id(user_id)
+                if updated:
+                    return updated
+            raise UserProfileNotFoundError("User profile not found")
+        except (UserProfileStorageError, UserProfileNotFoundError):
+            raise
+        except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
+            raise UserProfileStorageError("Profile storage is unavailable") from exc
 
     def provision_if_missing(
         self,

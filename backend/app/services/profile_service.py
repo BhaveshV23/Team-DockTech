@@ -5,10 +5,15 @@ from uuid import UUID
 
 from backend.app.repositories.user_repository import (
     UserProfileProvisioningError,
+    UserProfileNotFoundError,
     UserRepository,
     user_repository,
 )
-from backend.app.schemas.auth import UserRole
+from backend.app.schemas.auth import UserProfileResponse, UserRole
+
+
+class ProfileSelfRoleAssignmentError(Exception):
+    """Raised when an administrator targets their own profile for role change."""
 
 
 class ProfileProvisioningService:
@@ -53,6 +58,24 @@ class ProfileProvisioningService:
             display_name=display_name,
             role=UserRole.VIEWER.value,
         )
+
+    def assign_role(
+        self,
+        *,
+        target_user_id: UUID,
+        role: UserRole,
+        caller_profile: UserProfileResponse,
+    ) -> Dict[str, Any]:
+        target_role = UserRole(role)
+        if caller_profile.user_id == target_user_id:
+            raise ProfileSelfRoleAssignmentError("Administrators cannot change their own role")
+
+        if not self.repository.get_by_user_id(target_user_id):
+            raise UserProfileNotFoundError("User profile not found")
+        return self.repository.update_role_by_user_id(target_user_id, target_role.value)
+
+    def list_user_profiles(self) -> list[Dict[str, Any]]:
+        return self.repository.list_profiles()
 
 
 profile_provisioning_service = ProfileProvisioningService()

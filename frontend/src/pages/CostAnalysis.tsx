@@ -10,7 +10,7 @@ import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import DataProvenance from "../components/DataProvenance";
 import { useCargoRequest } from "../hooks/useCargoRequest";
-import { apiRequest, useAuthenticatedUser } from "../services/api";
+import { apiRequest, startPageLoadTiming, useAuthenticatedUser } from "../services/api";
 import { getStoredRecommendation } from "../services/recommendation";
 import type { CargoRequestResponse } from "../types/cargo";
 import type { RecommendationResult } from "../types/recommendation";
@@ -82,6 +82,7 @@ function CostAnalysis() {
         if (!cargoRequestId || !cargoUserId || !userId) return;
 
         let active = true;
+        const finishTiming = startPageLoadTiming("Cost Analysis");
         const key = `${userId}:${cargoRequestId}`;
         let promise = operationRef.current?.key === key
             ? operationRef.current.promise
@@ -133,7 +134,7 @@ function CostAnalysis() {
                         : "Unable to load cost analysis.",
                 });
             }
-        });
+        }).finally(finishTiming);
 
         return () => { active = false; };
     }, [cargoRequestId, cargoUserId, retryCount, userId]);
