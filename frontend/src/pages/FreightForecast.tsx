@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { AlertCircle, ArrowLeft, CalendarDays, RefreshCw, Ship, TrendingUp } from "lucide-react";
 import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
-import DataProvenance from "../components/DataProvenance";
+import { useWorkflowState } from "../context/WorkflowStateContext";
+import type { WorkflowScope, WorkflowVessel } from "../context/WorkflowStateContext";
 import { useCargoRequest } from "../hooks/useCargoRequest";
 import { apiRequest, startPageLoadTiming, useAuthenticatedUser } from "../services/api";
 import type { CargoRequestResponse } from "../types/cargo";
@@ -16,10 +17,7 @@ type RouteReference = {
     commodity: string;
 };
 
-type VesselReference = {
-    vessel_class_id: string;
-    vessel_class_name: string;
-};
+type VesselReference = Pick<WorkflowVessel, "vessel_class_id" | "vessel_class_name">;
 
 type ContextState =
     | { status: "loading" }
@@ -47,6 +45,46 @@ function messageFor(error: unknown) {
 
 function formatFreightUnit(unit: string): string {
     return unit.replace("_PER_", " / ");
+}
+
+function isVesselList(value: unknown): value is WorkflowVessel[] {
+    return Array.isArray(value) && value.every((vessel) =>
+        typeof vessel === "object" && vessel !== null &&
+        typeof vessel.vessel_class_id === "string" && typeof vessel.vessel_class_name === "string" &&
+        typeof vessel.dwt_min_mt === "number" && typeof vessel.dwt_max_mt === "number" &&
+        typeof vessel.loa_m === "number" && typeof vessel.beam_m === "number" &&
+        typeof vessel.draft_m === "number" && typeof vessel.speed_knots === "number" &&
+        typeof vessel.cargo_capacity_mt === "number" && typeof vessel.fuel_consumption_mt_day === "number" &&
+        typeof vessel.source === "string" && typeof vessel.data_type === "string",
+    );
+}
+
+function isValidHistory(
+    history: FreightHistoryResponse | null,
+    routeId: string,
+    vesselClassId: string,
+): history is FreightHistoryResponse {
+    return Boolean(history && history.route_id === routeId && history.vessel_class_id === vesselClassId &&
+        history.freight_unit === "USD_PER_MT" && Array.isArray(history.observations) &&
+        history.observations.every((point) => typeof point.observation_date === "string" &&
+            typeof point.freight_value === "number" && Number.isFinite(point.freight_value) &&
+            point.freight_unit === history.freight_unit && typeof point.currency === "string"));
+}
+
+function isValidForecast(
+    forecast: ForecastRunResponse | null,
+    request: ForecastRequest,
+): forecast is ForecastRunResponse {
+    return Boolean(forecast && forecast.cargo_request_id === request.cargo_request_id &&
+        forecast.route_id === request.route_id && forecast.vessel_class_id === request.vessel_class_id &&
+        forecast.freight_unit === request.freight_unit && typeof forecast.forecast_run_id === "string" &&
+        typeof forecast.model_name === "string" && typeof forecast.model_version === "string" &&
+        typeof forecast.training_data_end_date === "string" && Array.isArray(forecast.forecast_points) &&
+        forecast.forecast_points.every((point) => typeof point.forecast_date === "string" &&
+            typeof point.central_value === "number" && Number.isFinite(point.central_value) &&
+            typeof point.lower_value === "number" && Number.isFinite(point.lower_value) &&
+            typeof point.upper_value === "number" && Number.isFinite(point.upper_value) &&
+            typeof point.unit === "string"));
 }
 
 function ForecastChart({ history, points, unit }: { history: FreightHistoryResponse["observations"]; points: ForecastRunResponse["forecast_points"]; unit: string }) {
@@ -103,6 +141,8 @@ function ForecastChart({ history, points, unit }: { history: FreightHistoryRespo
 function FreightForecast() {
     const storedCargo = useCargoRequest();
     const user = useAuthenticatedUser();
+    const workflow = useWorkflowState();
+    const workflowRef = useRef(workflow);
     const cargoRequestId = storedCargo && user && storedCargo.user_id === user.user_id
         ? storedCargo.cargo_request_id
         : undefined;
@@ -130,25 +170,40 @@ function FreightForecast() {
     const pageLoadFinishRef = useRef<(() => void) | null>(null);
 
     useEffect(() => {
+        workflowRef.current = workflow;
+    }, [workflow]);
+
+    useEffect(() => {
         if (!cargoRequestId || !cargoUserId) {
             forecastRequestRef.current = null;
             return;
         }
 
         let active = true;
+        const workflowState = workflowRef.current;
+        const scope: WorkflowScope = { userId: cargoUserId, cargoRequestId };
+        workflowState.setActiveScope(cargoUserId, cargoRequestId);
         if (!pageLoadFinishRef.current) {
             pageLoadFinishRef.current = startPageLoadTiming("Freight Forecast");
         }
         forecastRequestRef.current = null;
         const loadContext = async () => {
+            const cachedCargo = workflowState.getVerifiedCargo(scope);
+            const cachedVessels = workflowState.getVessels(scope);
+            const reusableCargo = cachedCargo?.cargo_request_id === cargoRequestId && cachedCargo.user_id === cargoUserId
+                ? cachedCargo
+                : null;
+            const reusableVessels = isVesselList(cachedVessels) ? cachedVessels : null;
             const [cargo, routes, vessels] = await Promise.all([
-                apiRequest<CargoRequestResponse>(`/api/v1/cargo-requests/${encodeURIComponent(cargoRequestId)}`),
+                reusableCargo ?? apiRequest<CargoRequestResponse>(`/api/v1/cargo-requests/${encodeURIComponent(cargoRequestId)}`),
                 apiRequest<RouteReference[]>("/api/v1/routes"),
-                apiRequest<VesselReference[]>("/api/v1/vessels"),
+                reusableVessels ?? apiRequest<WorkflowVessel[]>("/api/v1/vessels"),
             ]);
             if (cargo.cargo_request_id !== cargoRequestId || cargo.user_id !== cargoUserId) {
                 throw new Error("The active cargo request could not be verified for this user.");
             }
+            if (!reusableCargo) workflowState.setVerifiedCargo(scope, cargo);
+            if (!reusableVessels && isVesselList(vessels)) workflowState.setVessels(scope, vessels);
             const matchingRoutes = routes.filter((route) =>
                 route.origin_port_id === cargo.origin_port_id &&
                 route.destination_port_id === cargo.destination_port_id &&
@@ -191,19 +246,35 @@ function FreightForecast() {
     }, [context, forecastState, historyState]);
 
     const retryContext = () => {
+        if (cargoUserId && cargoRequestId) {
+            workflowRef.current.invalidateWorkflowEntry({ type: "verifiedCargo" });
+            workflowRef.current.invalidateWorkflowEntry({ type: "vessels" });
+        }
         pageLoadFinishRef.current = null;
         setContext({ status: "loading" });
         setRetryCount((count) => count + 1);
     };
 
     useEffect(() => {
-        if (context.status !== "ready" || !vesselClassId) {
+        if (context.status !== "ready" || !vesselClassId || !cargoUserId) {
             return;
         }
-        const key = `${context.route.route_id}:${vesselClassId}:USD_PER_MT`;
-        const cachedHistory = historyResultsRef.current.get(key);
-        if (cachedHistory) {
+        const key = `${context.cargo.cargo_request_id}:${context.route.route_id}:${vesselClassId}:USD_PER_MT`;
+        const scope: WorkflowScope = { userId: cargoUserId, cargoRequestId: context.cargo.cargo_request_id };
+        const historyKey = {
+            routeId: context.route.route_id,
+            vesselClassId,
+            freightUnit: "USD_PER_MT" as const,
+        };
+        const cachedHistory = workflowRef.current.getForecastHistory(scope, historyKey);
+        if (isValidHistory(cachedHistory, context.route.route_id, vesselClassId)) {
+            historyResultsRef.current.set(key, cachedHistory);
             setHistoryState({ status: "ready", history: cachedHistory });
+            return;
+        }
+        const localHistory = historyResultsRef.current.get(key) ?? null;
+        if (isValidHistory(localHistory, context.route.route_id, vesselClassId)) {
+            setHistoryState({ status: "ready", history: localHistory });
             return;
         }
 
@@ -218,15 +289,10 @@ function FreightForecast() {
             });
             request = apiRequest<FreightHistoryResponse>(`/api/v1/forecast/history?${params.toString()}`)
                 .then((history) => {
-                    if (
-                        history.route_id !== context.route.route_id ||
-                        history.vessel_class_id !== vesselClassId ||
-                        history.freight_unit !== "USD_PER_MT" ||
-                        !Array.isArray(history.observations) ||
-                        history.observations.some((point) => point.freight_unit !== history.freight_unit)
-                    ) {
+                    if (!isValidHistory(history, context.route.route_id, vesselClassId)) {
                         throw new Error("Historical freight data did not match the selected route, vessel, and unit.");
                     }
+                    workflowRef.current.setForecastHistory(scope, historyKey, history);
                     historyResultsRef.current.set(key, history);
                     return history;
                 });
@@ -240,7 +306,21 @@ function FreightForecast() {
             if (active) setHistoryState({ status: "error", message: messageFor(error) });
         });
         return () => { active = false; };
-    }, [context, historyRetryCount, vesselClassId]);
+    }, [cargoUserId, context, historyRetryCount, vesselClassId]);
+
+    const retryHistory = () => {
+        if (context.status === "ready" && cargoUserId && vesselClassId) {
+            const key = `${context.cargo.cargo_request_id}:${context.route.route_id}:${vesselClassId}:USD_PER_MT`;
+            const historyKey = {
+                routeId: context.route.route_id,
+                vesselClassId,
+                freightUnit: "USD_PER_MT" as const,
+            };
+            historyResultsRef.current.delete(key);
+            workflowRef.current.invalidateWorkflowEntry({ type: "forecastHistory", key: historyKey });
+        }
+        setHistoryRetryCount((count) => count + 1);
+    };
 
     useEffect(() => {
         if (
@@ -262,9 +342,26 @@ function FreightForecast() {
             horizon,
         };
         const key = JSON.stringify(request);
-        const cachedForecast = forecastResultsRef.current.get(key);
-        if (cachedForecast) {
-            setForecastState({ status: "ready", forecast: cachedForecast });
+        const workflowScope: WorkflowScope = { userId: cargoUserId, cargoRequestId };
+        const forecastKey = {
+            routeId: request.route_id,
+            vesselClassId: request.vessel_class_id,
+            freightUnit: request.freight_unit,
+            horizon: request.horizon,
+        };
+        const contextForecast = workflowRef.current.getForecast(workflowScope, forecastKey);
+        if (isValidForecast(contextForecast, request)) {
+            forecastResultsRef.current.set(key, contextForecast);
+            setForecastState(contextForecast.forecast_points.length
+                ? { status: "ready", forecast: contextForecast }
+                : { status: "empty" });
+            return () => { active = false; };
+        }
+        const cachedForecast = forecastResultsRef.current.get(key) ?? null;
+        if (isValidForecast(cachedForecast, request)) {
+            setForecastState(cachedForecast.forecast_points.length
+                ? { status: "ready", forecast: cachedForecast }
+                : { status: "empty" });
             return () => { active = false; };
         }
         let operation = forecastRequestRef.current;
@@ -275,15 +372,10 @@ function FreightForecast() {
                 method: "POST",
                 body: JSON.stringify(request),
             }).then((forecast) => {
-                if (
-                    forecast.cargo_request_id !== request.cargo_request_id ||
-                    forecast.route_id !== request.route_id ||
-                    forecast.vessel_class_id !== request.vessel_class_id ||
-                    forecast.freight_unit !== request.freight_unit ||
-                    !Array.isArray(forecast.forecast_points)
-                ) {
+                if (!isValidForecast(forecast, request)) {
                     throw new Error("The forecast response did not match the selected cargo, route, vessel, and unit.");
                 }
+                workflowRef.current.setForecast(workflowScope, forecastKey, forecast);
                 if (forecast.forecast_points.length > 0) {
                     forecastResultsRef.current.set(key, forecast);
                 }
@@ -315,7 +407,15 @@ function FreightForecast() {
             freight_unit: "USD_PER_MT",
             horizon,
         };
-        forecastResultsRef.current.delete(JSON.stringify(request));
+        const requestKey = JSON.stringify(request);
+        const forecastKey = {
+            routeId: request.route_id,
+            vesselClassId: request.vessel_class_id,
+            freightUnit: request.freight_unit,
+            horizon: request.horizon,
+        };
+        forecastResultsRef.current.delete(requestKey);
+        workflowRef.current.invalidateWorkflowEntry({ type: "forecast", key: forecastKey });
         forecastRequestRef.current = null;
         setForecastRetryCount((count) => count + 1);
     };
@@ -341,8 +441,6 @@ function FreightForecast() {
                     <div><span className="forecast-eyebrow">FREIGHT INTELLIGENCE</span><h1>Freight Forecast</h1><p>Review historical reference rates and generate the backend forecast for the verified cargo, route, and vessel class.</p></div>
                     <div className="forecast-status" role={currentContext.status === "error" || (currentContext.status === "ready" && forecastState.status === "error") ? "alert" : undefined}><span className="forecast-status-dot"></span>{currentContext.status === "loading" ? "Loading reference data" : currentContext.status === "ready" ? forecastState.status === "loading" ? "Generating forecast" : forecastState.status === "ready" ? "Forecast ready" : forecastState.status === "empty" ? "No forecast points" : forecastState.status === "error" ? "Forecast unavailable" : "Ready to forecast" : currentContext.status === "error" ? "Unable to load" : "No forecast data"}</div>
                 </header>
-
-                <DataProvenance />
 
                 {currentContext.status === "loading" ? <section className="forecast-state-card" role="status" aria-live="polite">Verifying cargo and loading route and vessel references…</section> : null}
                 {currentContext.status === "error" ? <section className="forecast-state-card forecast-error" role="alert"><AlertCircle /><div><h2>Forecast inputs unavailable</h2><p>{currentContext.message}</p><button type="button" className="forecast-action-button" onClick={retryContext}>Retry</button></div></section> : null}
@@ -370,7 +468,7 @@ function FreightForecast() {
                     <section className="forecast-chart-card">
                         <div className="forecast-card-header"><div><h2>Freight Rate Outlook</h2><p>Backend forecast values for the selected {horizon}-day horizon.</p></div><div className="forecast-unit-label">USD / MT</div></div>
                         {historyState.status === "loading" && <p className="forecast-history-status" role="status">Loading dated historical freight reference observations…</p>}
-                        {historyState.status === "error" && <p className="forecast-history-status forecast-history-error" role="alert">Historical reference observations are unavailable: {historyState.message} <button type="button" onClick={() => setHistoryRetryCount((count) => count + 1)}>Retry history</button></p>}
+                        {historyState.status === "error" && <p className="forecast-history-status forecast-history-error" role="alert">Historical reference observations are unavailable: {historyState.message} <button type="button" onClick={retryHistory}>Retry history</button></p>}
                         {forecastState.status === "idle" ? <div className="forecast-empty-chart"><div className="forecast-chart-icon"><TrendingUp size={25} /></div><h3>Forecast not generated</h3><p>Select a vessel class and generate a forecast to display backend forecast points.</p></div> : null}
                         {forecastState.status === "loading" ? <div className="forecast-empty-chart" role="status" aria-live="polite"><RefreshCw className="forecast-spinner" size={25} /><h3>Generating forecast</h3><p>Waiting for the backend forecast result.</p></div> : null}
                         {forecastState.status === "error" ? <div className="forecast-empty-chart forecast-error" role="alert"><AlertCircle size={25} /><h3>Forecast unavailable</h3><p>{forecastState.message}</p><button type="button" className="forecast-action-button" onClick={generateForecast}>Retry forecast</button></div> : null}

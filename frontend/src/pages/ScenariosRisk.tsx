@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { AlertCircle, ArrowLeft, CheckCircle2, Info, RefreshCw, TrendingDown, TrendingUp } from "lucide-react";
 import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
-import DataProvenance from "../components/DataProvenance";
+import { useWorkflowState } from "../context/WorkflowStateContext";
+import type { WorkflowScope } from "../context/WorkflowStateContext";
 import { useCargoRequest } from "../hooks/useCargoRequest";
 import { apiRequest, startPageLoadTiming, useAuthenticatedUser } from "../services/api";
 import {
@@ -57,6 +58,59 @@ function parseCongestionLevel(value: string): CongestionLevel {
     return "MEDIUM";
 }
 
+function isReusableCargo(value: CargoRequestResponse | null, userId: string, cargoRequestId: string): value is CargoRequestResponse {
+    return Boolean(value && value.user_id === userId && value.cargo_request_id === cargoRequestId &&
+        typeof value.commodity === "string" && typeof value.cargo_volume_mt === "number" &&
+        Number.isFinite(value.cargo_volume_mt) && typeof value.origin_port_id === "string" &&
+        typeof value.destination_port_id === "string" && typeof value.earliest_delivery_date === "string" &&
+        typeof value.latest_delivery_date === "string" && typeof value.contract_horizon === "string");
+}
+
+function isScenarioDefault(value: unknown): value is ScenarioDefault {
+    if (typeof value !== "object" || value === null) return false;
+    const item = value as Record<string, unknown>;
+    const isCongestion = (level: unknown) => level === "LOW" || level === "MEDIUM" || level === "HIGH";
+    return (item.scenario_id === "BASELINE" || item.scenario_id === "ADVERSE" || item.scenario_id === "FAVORABLE") &&
+        typeof item.scenario_name === "string" && typeof item.freight_change_pct === "number" && Number.isFinite(item.freight_change_pct) &&
+        typeof item.fuel_change_pct === "number" && Number.isFinite(item.fuel_change_pct) &&
+        typeof item.delay_hours === "number" && Number.isFinite(item.delay_hours) &&
+        isCongestion(item.port_congestion_level) && typeof item.description === "string";
+}
+
+function isValidDefaults(value: ScenarioDefault[] | null): value is ScenarioDefault[] {
+    return Array.isArray(value) && value.every(isScenarioDefault);
+}
+
+function isScenarioResult(value: unknown, cargoRequestId: string): value is ScenarioResult {
+    if (typeof value !== "object" || value === null) return false;
+    const result = value as Record<string, unknown>;
+    const cost = result.cost_breakdown;
+    if (typeof cost !== "object" || cost === null) return false;
+    const costRecord = cost as Record<string, unknown>;
+    const costFields = [
+        "sailing_days", "required_voyages", "origin_handling_hours_total", "destination_handling_hours_total",
+        "waiting_hours_total", "scenario_delay_total", "estimated_turnaround_hours", "turnaround_hours_per_voyage",
+        "port_days_per_voyage", "vessel_days_per_voyage", "total_fuel_cost_usd", "expected_freight_cost",
+        "expected_total_cost", "effective_cost_per_mt",
+    ];
+    const isRisk = (risk: unknown) => risk === "LOW" || risk === "MEDIUM" || risk === "HIGH";
+    return typeof result.scenario_instance_id === "string" && result.cargo_request_id === cargoRequestId &&
+        (result.scenario_type === "BASELINE" || result.scenario_type === "ADVERSE" || result.scenario_type === "FAVORABLE") &&
+        typeof result.freight_change_pct === "number" && Number.isFinite(result.freight_change_pct) &&
+        typeof result.fuel_change_pct === "number" && Number.isFinite(result.fuel_change_pct) &&
+        typeof result.delay_hours === "number" && Number.isFinite(result.delay_hours) &&
+        (result.congestion_level === "LOW" || result.congestion_level === "MEDIUM" || result.congestion_level === "HIGH") &&
+        typeof result.estimated_total_cost === "number" && Number.isFinite(result.estimated_total_cost) &&
+        typeof result.estimated_turnaround_hours === "number" && Number.isFinite(result.estimated_turnaround_hours) &&
+        isRisk(result.risk_level) && typeof result.created_at === "string" &&
+        costFields.every((field) => typeof costRecord[field] === "number" && Number.isFinite(costRecord[field]));
+}
+
+function isValidCanonical(value: CanonicalScenarioSet | null, cargoRequestId: string): value is CanonicalScenarioSet {
+    return Boolean(value && isScenarioResult(value.baseline, cargoRequestId) &&
+        isScenarioResult(value.adverse, cargoRequestId) && isScenarioResult(value.favorable, cargoRequestId));
+}
+
 function ScenarioMetrics({ result }: { result: ScenarioResult }) {
     const cost = result.cost_breakdown;
     const rows: Array<[string, string]> = [
@@ -103,12 +157,24 @@ function ScenariosRisk() {
     const cargoRequestId = storedCargo?.cargo_request_id;
     const cargoUserId = storedCargo?.user_id;
     const userId = user?.user_id;
+    const workflow = useWorkflowState();
+    const workflowRef = useRef(workflow);
     const [retryCount, setRetryCount] = useState(0);
     const [pageState, setPageState] = useState<PageState>(cargoRequestId ? { status: "loading" } : { status: "empty", message: "Create a cargo request before running scenario analysis." });
     const [form, setForm] = useState<CustomForm>(initialCustomForm);
     const [customState, setCustomState] = useState<CustomState>({ status: "idle" });
     const recommendationRequestRef = useRef<{ key: string; promise: Promise<RecommendationResult> } | null>(null);
     const pageLoadRequestRef = useRef<{ key: string; promise: Promise<PageState> } | null>(null);
+    const failedWorkflowEntryRef = useRef<
+        | { type: "verifiedCargo" }
+        | { type: "scenarioDefaults" }
+        | { type: "canonicalScenarios"; forecastRunId: string }
+        | null
+    >(null);
+
+    useEffect(() => {
+        workflowRef.current = workflow;
+    }, [workflow]);
 
     useEffect(() => {
         if (!cargoRequestId || !cargoUserId || !userId) return;
@@ -116,11 +182,26 @@ function ScenariosRisk() {
         const finishTiming = startPageLoadTiming("Scenarios & Risk");
         const loadScenarios = async (): Promise<PageState> => {
             const key = `${userId}:${cargoRequestId}`;
+            const workflowState = workflowRef.current;
+            const scope: WorkflowScope = { userId, cargoRequestId };
+            workflowState.setActiveScope(userId, cargoRequestId);
             const cachedRecommendation = getStoredRecommendation(userId, cargoRequestId);
-            const cargo = await apiRequest<CargoRequestResponse>(`/api/v1/cargo-requests/${encodeURIComponent(cargoRequestId)}`);
+            const cachedCargo = workflowState.getVerifiedCargo(scope);
+            let cargo = isReusableCargo(cachedCargo, userId, cargoRequestId)
+                ? cachedCargo
+                : null;
+            if (!cargo) {
+                failedWorkflowEntryRef.current = { type: "verifiedCargo" };
+                cargo = await apiRequest<CargoRequestResponse>(`/api/v1/cargo-requests/${encodeURIComponent(cargoRequestId)}`);
+            }
             if (cargo.cargo_request_id !== cargoRequestId || cargo.user_id !== userId || cargoUserId !== userId) {
+                failedWorkflowEntryRef.current = { type: "verifiedCargo" };
                 throw new Error("The active cargo request could not be verified for this user.");
             }
+            if (!isReusableCargo(cachedCargo, userId, cargoRequestId)) {
+                workflowState.setVerifiedCargo(scope, cargo);
+            }
+            failedWorkflowEntryRef.current = null;
 
             let recommendation = cachedRecommendation?.cargo_request_id === cargoRequestId &&
                 cachedRecommendation.forecast_run_id.trim()
@@ -152,25 +233,42 @@ function ScenariosRisk() {
             if (recommendation.cargo_request_id !== cargoRequestId || !recommendation.forecast_run_id) {
                 throw new Error("The existing recommendation workflow returned no matching forecast run.");
             }
-            const defaultsResponse = await apiRequest<ScenarioApiResponse<ScenarioDefault[]>>(
-                "/api/v1/scenarios/defaults",
-            );
-            const defaults = unwrap(defaultsResponse, "Scenario defaults");
-            if (defaults.length === 0) return { status: "empty", message: "The backend returned no canonical scenario defaults." };
-
-            const canonicalResponse = await apiRequest<ScenarioApiResponse<CanonicalScenarioSet>>("/api/v1/scenarios/run-canonical", {
-                method: "POST",
-                body: JSON.stringify({ cargo_request_id: cargoRequestId, forecast_run_id: recommendation.forecast_run_id }),
-            });
-            const canonical = unwrap(canonicalResponse, "Canonical scenarios");
-            if (
-                canonical.baseline?.cargo_request_id !== cargoRequestId ||
-                canonical.adverse?.cargo_request_id !== cargoRequestId ||
-                canonical.favorable?.cargo_request_id !== cargoRequestId
-            ) {
-                throw new Error("The canonical scenario response does not match the active cargo request.");
+            const forecastRunId = recommendation.forecast_run_id;
+            const cachedDefaults = workflowState.getScenarioDefaults(scope);
+            let defaults = isValidDefaults(cachedDefaults) ? cachedDefaults : null;
+            if (!defaults) {
+                failedWorkflowEntryRef.current = { type: "scenarioDefaults" };
+                const defaultsResponse = await apiRequest<ScenarioApiResponse<ScenarioDefault[]>>(
+                    "/api/v1/scenarios/defaults",
+                );
+                const responseDefaults = unwrap(defaultsResponse, "Scenario defaults");
+                if (!isValidDefaults(responseDefaults)) throw new Error("Scenario defaults returned invalid data.");
+                defaults = responseDefaults;
+                workflowState.setScenarioDefaults(scope, defaults);
             }
-            const readyState: PageState = { status: "ready", cargo, forecastRunId: recommendation.forecast_run_id, defaults, canonical };
+            failedWorkflowEntryRef.current = null;
+            if (defaults.length === 0) {
+                failedWorkflowEntryRef.current = { type: "scenarioDefaults" };
+                return { status: "empty", message: "The backend returned no canonical scenario defaults." };
+            }
+
+            const cachedCanonical = workflowState.getCanonicalScenarios(scope, forecastRunId);
+            let canonical = isValidCanonical(cachedCanonical, cargoRequestId) ? cachedCanonical : null;
+            if (!canonical) {
+                failedWorkflowEntryRef.current = { type: "canonicalScenarios", forecastRunId };
+                const canonicalResponse = await apiRequest<ScenarioApiResponse<CanonicalScenarioSet>>("/api/v1/scenarios/run-canonical", {
+                    method: "POST",
+                    body: JSON.stringify({ cargo_request_id: cargoRequestId, forecast_run_id: forecastRunId }),
+                });
+                const responseCanonical = unwrap(canonicalResponse, "Canonical scenarios");
+                if (!isValidCanonical(responseCanonical, cargoRequestId)) {
+                    throw new Error("The canonical scenario response does not match the active cargo request.");
+                }
+                canonical = responseCanonical;
+                workflowState.setCanonicalScenarios(scope, forecastRunId, canonical);
+            }
+            failedWorkflowEntryRef.current = null;
+            const readyState: PageState = { status: "ready", cargo, forecastRunId, defaults, canonical };
             if (active) {
                 setPageState(readyState);
                 setCustomState({ status: "idle" });
@@ -198,6 +296,12 @@ function ScenariosRisk() {
     }, [cargoRequestId, cargoUserId, retryCount, userId]);
 
     const retry = () => {
+        const failedEntry = failedWorkflowEntryRef.current;
+        if (failedEntry) {
+            workflowRef.current.invalidateWorkflowEntry(failedEntry.type === "canonicalScenarios"
+                ? { type: "canonicalScenarios", forecastRunId: failedEntry.forecastRunId }
+                : { type: failedEntry.type });
+        }
         pageLoadRequestRef.current = null;
         setPageState({ status: "loading" });
         setRetryCount((count) => count + 1);
@@ -257,8 +361,6 @@ function ScenariosRisk() {
                 {visiblePageState.status === "loading" && <section className="scenarios-page-state" role="status" aria-live="polite"><RefreshCw className="scenarios-spinner" /><div><h2>Loading scenario analysis</h2><p>Verifying cargo and loading its recommendation forecast run, defaults, and canonical scenarios.</p></div></section>}
                 {visiblePageState.status === "error" && <section className="scenarios-page-state scenarios-error" role="alert"><AlertCircle /><div><h2>Scenario analysis unavailable</h2><p>{visiblePageState.message}</p><button type="button" className="scenarios-submit-button" onClick={retry}>Retry</button></div></section>}
                 {visiblePageState.status === "empty" && <section className="scenarios-page-state" role="status"><Info /><div><h2>No scenario data</h2><p>{visiblePageState.message}</p>{cargoRequestId ? <button type="button" className="scenarios-submit-button" onClick={retry}>Retry</button> : <Link to="/cargo-request">Create Cargo Request</Link>}</div></section>}
-
-                <DataProvenance />
 
                 {pageState.status === "ready" && visiblePageState.status === "ready" && <>
                     <section className="scenarios-request-card"><div><span className="scenarios-request-label">VERIFIED CARGO REQUEST</span><h2>{pageState.cargo.commodity.replace(/_/g, " ")}</h2><div className="scenarios-provenance"><small>Cargo Request ID: {pageState.cargo.cargo_request_id}</small><small>Forecast Run ID: {pageState.forecastRunId}</small></div></div><div className="scenarios-request-details"><div><span>Volume</span><strong>{pageState.cargo.cargo_volume_mt} MT</strong></div><div><span>Origin</span><strong>{pageState.cargo.origin_port_id}</strong></div><div><span>Destination</span><strong>{pageState.cargo.destination_port_id}</strong></div></div></section>

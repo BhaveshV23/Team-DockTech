@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
     AlertCircle,
     ArrowLeft,
@@ -7,39 +7,15 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
-import DataProvenance from "../components/DataProvenance";
+import { useWorkflowState } from "../context/WorkflowStateContext";
+import type { WorkflowFeasibility, WorkflowScope, WorkflowVessel } from "../context/WorkflowStateContext";
 import { useCargoRequest } from "../hooks/useCargoRequest";
-import { apiRequest, startPageLoadTiming } from "../services/api";
+import { apiRequest, startPageLoadTiming, useAuthenticatedUser } from "../services/api";
 import type { CargoRequestResponse } from "../types/cargo";
 import "./VesselOptions.css";
 
-type VesselClass = {
-    vessel_class_id: string;
-    vessel_class_name: string;
-    dwt_min_mt: number;
-    dwt_max_mt: number;
-    loa_m: number;
-    beam_m: number;
-    draft_m: number;
-    speed_knots: number;
-    cargo_capacity_mt: number;
-    fuel_consumption_mt_day: number;
-    source: string;
-    data_type: string;
-};
-
-type FeasibilityResult = {
-    is_feasible: boolean;
-    status: string;
-    vessel_class_id: string;
-    origin_port_id: string;
-    destination_port_id: string;
-    commodity: string;
-    cargo_volume_mt: number;
-    required_voyages: number | null;
-    rejection_reason_code: string | null;
-    rejection_reason: string | null;
-};
+type VesselClass = WorkflowVessel;
+type FeasibilityResult = WorkflowFeasibility;
 
 type VesselOption = {
     vessel: VesselClass;
@@ -52,46 +28,122 @@ type PageState =
     | { status: "error"; message: string }
     | { status: "empty" };
 
+function isVesselList(value: unknown): value is VesselClass[] {
+    return Array.isArray(value) && value.every((vessel) =>
+        typeof vessel === "object" && vessel !== null &&
+        typeof vessel.vessel_class_id === "string" && vessel.vessel_class_id.trim().length > 0 &&
+        typeof vessel.vessel_class_name === "string" &&
+        typeof vessel.dwt_min_mt === "number" && Number.isFinite(vessel.dwt_min_mt) &&
+        typeof vessel.dwt_max_mt === "number" && Number.isFinite(vessel.dwt_max_mt) &&
+        typeof vessel.loa_m === "number" && Number.isFinite(vessel.loa_m) &&
+        typeof vessel.beam_m === "number" && Number.isFinite(vessel.beam_m) &&
+        typeof vessel.draft_m === "number" && Number.isFinite(vessel.draft_m) &&
+        typeof vessel.speed_knots === "number" && Number.isFinite(vessel.speed_knots) &&
+        typeof vessel.cargo_capacity_mt === "number" && Number.isFinite(vessel.cargo_capacity_mt) &&
+        typeof vessel.fuel_consumption_mt_day === "number" && Number.isFinite(vessel.fuel_consumption_mt_day) &&
+        typeof vessel.source === "string" && typeof vessel.data_type === "string",
+    );
+}
+
+function isReusableCargo(value: CargoRequestResponse | null, userId: string, cargoRequestId: string): value is CargoRequestResponse {
+    return Boolean(value && value.user_id === userId && value.cargo_request_id === cargoRequestId &&
+        typeof value.commodity === "string" && typeof value.cargo_volume_mt === "number" &&
+        Number.isFinite(value.cargo_volume_mt) && typeof value.origin_port_id === "string" &&
+        typeof value.destination_port_id === "string");
+}
+
+function isValidFeasibility(
+    value: FeasibilityResult | null,
+    vessel: VesselClass,
+    cargo: CargoRequestResponse,
+): value is FeasibilityResult {
+    return Boolean(value && typeof value.is_feasible === "boolean" && typeof value.status === "string" &&
+        value.vessel_class_id === vessel.vessel_class_id &&
+        value.origin_port_id === cargo.origin_port_id && value.destination_port_id === cargo.destination_port_id &&
+        value.commodity === cargo.commodity && value.cargo_volume_mt === cargo.cargo_volume_mt &&
+        (value.required_voyages === null || (typeof value.required_voyages === "number" && Number.isFinite(value.required_voyages))) &&
+        (value.rejection_reason_code === null || typeof value.rejection_reason_code === "string") &&
+        (value.rejection_reason === null || typeof value.rejection_reason === "string"));
+}
+
 function VesselOptions() {
     const storedCargo = useCargoRequest();
+    const user = useAuthenticatedUser();
     const cargoRequestId = storedCargo?.cargo_request_id;
-    const cargoUserId = storedCargo?.user_id;
+    const cargoUserId = user?.user_id;
+    const workflow = useWorkflowState();
+    const workflowRef = useRef(workflow);
     const [retryCount, setRetryCount] = useState(0);
     const [pageState, setPageState] = useState<PageState>(
         cargoRequestId ? { status: "loading" } : { status: "empty" },
     );
+    const loadOperationRef = useRef<{ key: string; promise: Promise<{ cargo: CargoRequestResponse; options: VesselOption[] }> } | null>(null);
+
+    useEffect(() => {
+        workflowRef.current = workflow;
+    }, [workflow]);
 
     useEffect(() => {
         if (!cargoRequestId || !cargoUserId) return;
 
         let active = true;
+        const workflowState = workflowRef.current;
+        const scope: WorkflowScope = { userId: cargoUserId, cargoRequestId };
+        workflowState.setActiveScope(cargoUserId, cargoRequestId);
         const finishTiming = startPageLoadTiming("Vessel Options");
-        const loadOptions = async () => {
-            const cargo = await apiRequest<CargoRequestResponse>(
-                `/api/v1/cargo-requests/${encodeURIComponent(cargoRequestId)}`,
-            );
+        const loadOptions = async (): Promise<{ cargo: CargoRequestResponse; options: VesselOption[] }> => {
+            const cachedCargo = workflowState.getVerifiedCargo(scope);
+            let cargo: CargoRequestResponse;
+            if (isReusableCargo(cachedCargo, cargoUserId, cargoRequestId)) {
+                cargo = cachedCargo;
+            } else {
+                cargo = await apiRequest<CargoRequestResponse>(
+                    `/api/v1/cargo-requests/${encodeURIComponent(cargoRequestId)}`,
+                );
+            }
             if (
                 cargo.cargo_request_id !== cargoRequestId ||
                 cargo.user_id !== cargoUserId
             ) {
                 throw new Error("The active cargo request could not be verified.");
             }
+            if (!isReusableCargo(cachedCargo, cargoUserId, cargoRequestId) &&
+                isReusableCargo(cargo, cargoUserId, cargoRequestId)) {
+                workflowState.setVerifiedCargo(scope, cargo);
+            }
 
-            const vessels = await apiRequest<VesselClass[]>("/api/v1/vessels");
+            const cachedVessels = workflowState.getVessels(scope);
+            let vessels = isVesselList(cachedVessels) ? cachedVessels : null;
+            if (!vessels) {
+                const response = await apiRequest<VesselClass[]>("/api/v1/vessels");
+                if (!isVesselList(response)) {
+                    throw new Error("The backend returned invalid vessel reference data.");
+                }
+                vessels = response;
+                workflowState.setVessels(scope, vessels);
+            }
+
             const options = await Promise.all(vessels.map(async (vessel) => {
-                const feasibility = await apiRequest<FeasibilityResult>(
-                    "/api/v1/feasibility",
-                    {
-                        method: "POST",
-                        body: JSON.stringify({
-                            origin_port_id: cargo.origin_port_id,
-                            destination_port_id: cargo.destination_port_id,
-                            commodity: cargo.commodity,
-                            vessel_class_id: vessel.vessel_class_id,
-                            cargo_volume_mt: cargo.cargo_volume_mt,
-                        }),
-                    },
-                );
+                const cachedFeasibility = workflowState.getFeasibility(scope, vessel.vessel_class_id);
+                let feasibility = isValidFeasibility(cachedFeasibility, vessel, cargo)
+                    ? cachedFeasibility
+                    : null;
+                if (!feasibility) {
+                    const response = await apiRequest<FeasibilityResult>(
+                        "/api/v1/feasibility",
+                        {
+                            method: "POST",
+                            body: JSON.stringify({
+                                origin_port_id: cargo.origin_port_id,
+                                destination_port_id: cargo.destination_port_id,
+                                commodity: cargo.commodity,
+                                vessel_class_id: vessel.vessel_class_id,
+                                cargo_volume_mt: cargo.cargo_volume_mt,
+                            }),
+                        },
+                    );
+                    feasibility = response;
+                }
                 if (
                     feasibility.vessel_class_id !== vessel.vessel_class_id ||
                     feasibility.origin_port_id !== cargo.origin_port_id ||
@@ -101,13 +153,26 @@ function VesselOptions() {
                 ) {
                     throw new Error(`Feasibility response did not match ${vessel.vessel_class_id} and the active cargo request.`);
                 }
+                if (!isValidFeasibility(cachedFeasibility, vessel, cargo) &&
+                    isValidFeasibility(feasibility, vessel, cargo)) {
+                    workflowState.setFeasibility(scope, vessel.vessel_class_id, feasibility);
+                }
                 return { vessel, feasibility };
             }));
 
             return { cargo, options };
         };
 
-        void loadOptions().then(({ cargo, options }) => {
+        const operationKey = `${cargoUserId}:${cargoRequestId}:${retryCount}`;
+        let operation = loadOperationRef.current?.key === operationKey
+            ? loadOperationRef.current.promise
+            : null;
+        if (!operation) {
+            operation = loadOptions();
+            loadOperationRef.current = { key: operationKey, promise: operation };
+        }
+
+        void operation.then(({ cargo, options }) => {
             if (active) setPageState({ status: "success", cargo, options });
         }).catch((loadError: unknown) => {
             if (active) {
@@ -118,12 +183,29 @@ function VesselOptions() {
                         : "Unable to load vessel feasibility. Please try again.",
                 });
             }
-        }).finally(finishTiming);
+        }).finally(() => {
+            if (loadOperationRef.current?.key === operationKey) loadOperationRef.current = null;
+            finishTiming();
+        });
 
         return () => { active = false; };
     }, [cargoRequestId, cargoUserId, retryCount]);
 
     const retry = () => {
+        if (cargoRequestId && cargoUserId) {
+            const scope = { userId: cargoUserId, cargoRequestId };
+            const knownVessels = workflowRef.current.getVessels(scope);
+            workflowRef.current.invalidateWorkflowEntry({ type: "verifiedCargo" });
+            workflowRef.current.invalidateWorkflowEntry({ type: "vessels" });
+            if (isVesselList(knownVessels)) {
+                knownVessels.forEach((vessel) => {
+                    workflowRef.current.invalidateWorkflowEntry({
+                        type: "feasibility",
+                        vesselClassId: vessel.vessel_class_id,
+                    });
+                });
+            }
+        }
         setPageState({ status: "loading" });
         setRetryCount((count) => count + 1);
     };
@@ -156,8 +238,6 @@ function VesselOptions() {
                                 pageState.status === "error" ? "Unable to load" : "No active request"}
                     </div>
                 </header>
-
-                <DataProvenance />
 
                 {pageState.status === "empty" || noActiveCargo ? (
                     <section className="vessel-table-card">

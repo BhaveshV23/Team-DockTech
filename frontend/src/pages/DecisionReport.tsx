@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertCircle, AlertTriangle, ArrowLeft, BarChart3, CheckCircle2, Download, FileText, Info, Ship, TrendingUp } from "lucide-react";
 import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import DataProvenance from "../components/DataProvenance";
+import { useWorkflowState } from "../context/WorkflowStateContext";
+import type { WorkflowScope } from "../context/WorkflowStateContext";
 import { useCargoRequest } from "../hooks/useCargoRequest";
 import { apiRequest, useAuthenticatedUser } from "../services/api";
 import { getStoredRecommendation } from "../services/recommendation";
@@ -16,6 +18,14 @@ type ReportState =
     | { status: "no-cargo" }
     | { status: "no-decision"; cargo: CargoRequestResponse }
     | { status: "ready"; cargo: CargoRequestResponse; recommendation: RecommendationResult };
+
+function isReusableCargo(value: CargoRequestResponse | null, userId: string, cargoRequestId: string): value is CargoRequestResponse {
+    return Boolean(value && value.user_id === userId && value.cargo_request_id === cargoRequestId &&
+        typeof value.commodity === "string" && typeof value.cargo_volume_mt === "number" &&
+        Number.isFinite(value.cargo_volume_mt) && typeof value.origin_port_id === "string" &&
+        typeof value.destination_port_id === "string" && typeof value.earliest_delivery_date === "string" &&
+        typeof value.latest_delivery_date === "string" && typeof value.contract_horizon === "string");
+}
 
 function formatMoney(value: number | string) {
     return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(Number(value));
@@ -47,18 +57,34 @@ function DecisionReport() {
     const cargoRequestId = storedCargo?.cargo_request_id;
     const storedCargoUserId = storedCargo?.user_id;
     const userId = user?.user_id;
+    const workflow = useWorkflowState();
+    const workflowRef = useRef(workflow);
     const [retryCount, setRetryCount] = useState(0);
     const [pageState, setPageState] = useState<ReportState>(cargoRequestId ? { status: "loading" } : { status: "no-cargo" });
+
+    useEffect(() => {
+        workflowRef.current = workflow;
+    }, [workflow]);
 
     useEffect(() => {
         if (!cargoRequestId || !storedCargoUserId || !userId) return;
         let active = true;
         const loadReport = async () => {
             if (storedCargoUserId !== userId) throw new Error("The saved cargo request does not belong to the signed-in user.");
+            const workflowState = workflowRef.current;
+            const scope: WorkflowScope = { userId, cargoRequestId };
+            workflowState.setActiveScope(userId, cargoRequestId);
             const cachedRecommendation = getStoredRecommendation(userId, cargoRequestId);
-            const cargo = await apiRequest<CargoRequestResponse>(`/api/v1/cargo-requests/${encodeURIComponent(cargoRequestId)}`);
+            const contextCargo = workflowState.getVerifiedCargo(scope);
+            const cargo = isReusableCargo(contextCargo, userId, cargoRequestId)
+                ? contextCargo
+                : await apiRequest<CargoRequestResponse>(`/api/v1/cargo-requests/${encodeURIComponent(cargoRequestId)}`);
             if (cargo.cargo_request_id !== cargoRequestId || cargo.user_id !== userId) {
                 throw new Error("The backend cargo request could not be verified for this user.");
+            }
+            if (!isReusableCargo(contextCargo, userId, cargoRequestId) &&
+                isReusableCargo(cargo, userId, cargoRequestId)) {
+                workflowState.setVerifiedCargo(scope, cargo);
             }
             const recommendation = [
                 cachedRecommendation,
@@ -83,6 +109,9 @@ function DecisionReport() {
     }, [cargoRequestId, retryCount, storedCargoUserId, userId]);
 
     const retry = () => {
+        if (userId && cargoRequestId) {
+            workflowRef.current.invalidateWorkflowEntry({ type: "verifiedCargo" });
+        }
         setPageState({ status: "loading" });
         setRetryCount((count) => count + 1);
     };

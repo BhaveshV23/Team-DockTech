@@ -8,7 +8,8 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
-import DataProvenance from "../components/DataProvenance";
+import { useWorkflowState } from "../context/WorkflowStateContext";
+import type { WorkflowCostResult, WorkflowScope } from "../context/WorkflowStateContext";
 import { useCargoRequest } from "../hooks/useCargoRequest";
 import { apiRequest, startPageLoadTiming, useAuthenticatedUser } from "../services/api";
 import { getStoredRecommendation } from "../services/recommendation";
@@ -16,28 +17,7 @@ import type { CargoRequestResponse } from "../types/cargo";
 import type { RecommendationResult } from "../types/recommendation";
 import "./CostAnalysis.css";
 
-type CostResponse = {
-    required_voyages: number;
-    sailing_days_per_voyage: number;
-    origin_handling_hours_total: number;
-    dest_handling_hours_total: number;
-    waiting_hours_total: number;
-    scenario_delay_hours_total: number;
-    estimated_turnaround_hours: number;
-    port_days_per_voyage: number;
-    vessel_days_per_voyage: number;
-    vlsfo_price_used: number;
-    total_fuel_consumption_mt: number;
-    total_fuel_cost_usd: number;
-    freight_rate_used: number;
-    freight_unit: string;
-    expected_freight_cost: number;
-    port_costs_usd: number;
-    expected_total_cost: number;
-    effective_cost_per_mt: number;
-    cost_reference_date: string;
-    assumptions: string[];
-};
+type CostResponse = WorkflowCostResult;
 
 type CostPageData = {
     cargo: CargoRequestResponse;
@@ -63,12 +43,37 @@ function formatFreightUnit(unit: string): string {
     return unit.replace("_PER_", " / ");
 }
 
+function isValidCost(value: CostResponse | null): value is CostResponse {
+    const numericFields: (keyof CostResponse)[] = [
+        "required_voyages", "sailing_days_per_voyage", "origin_handling_hours_total",
+        "dest_handling_hours_total", "waiting_hours_total", "scenario_delay_hours_total",
+        "estimated_turnaround_hours", "port_days_per_voyage", "vessel_days_per_voyage",
+        "vlsfo_price_used", "total_fuel_consumption_mt", "total_fuel_cost_usd",
+        "freight_rate_used", "expected_freight_cost", "port_costs_usd",
+        "expected_total_cost", "effective_cost_per_mt",
+    ];
+    return Boolean(value && numericFields.every((field) =>
+        typeof value[field] === "number" && Number.isFinite(value[field]),
+    ) && typeof value.freight_unit === "string" && typeof value.cost_reference_date === "string" &&
+        Array.isArray(value.assumptions) && value.assumptions.every((item) => typeof item === "string"));
+}
+
+function isReusableCargo(value: CargoRequestResponse | null, userId: string, cargoRequestId: string): value is CargoRequestResponse {
+    return Boolean(value && value.user_id === userId && value.cargo_request_id === cargoRequestId &&
+        typeof value.commodity === "string" && typeof value.cargo_volume_mt === "number" &&
+        Number.isFinite(value.cargo_volume_mt) && typeof value.origin_port_id === "string" &&
+        typeof value.destination_port_id === "string" && typeof value.earliest_delivery_date === "string" &&
+        typeof value.latest_delivery_date === "string" && typeof value.contract_horizon === "string");
+}
+
 function CostAnalysis() {
     const storedCargo = useCargoRequest();
     const user = useAuthenticatedUser();
     const cargoRequestId = storedCargo?.cargo_request_id;
     const cargoUserId = storedCargo?.user_id;
     const userId = user?.user_id;
+    const workflow = useWorkflowState();
+    const workflowRef = useRef(workflow);
     const [retryCount, setRetryCount] = useState(0);
     const [pageState, setPageState] = useState<PageState>(
         cargoRequestId && cargoUserId && userId ? { status: "loading" } : { status: "empty" },
@@ -77,6 +82,10 @@ function CostAnalysis() {
         key: string;
         promise: Promise<CostPageData>;
     } | null>(null);
+
+    useEffect(() => {
+        workflowRef.current = workflow;
+    }, [workflow]);
 
     useEffect(() => {
         if (!cargoRequestId || !cargoUserId || !userId) return;
@@ -90,15 +99,25 @@ function CostAnalysis() {
 
         if (!promise) {
             promise = (async () => {
-                const cargo = await apiRequest<CargoRequestResponse>(
-                    `/api/v1/cargo-requests/${encodeURIComponent(cargoRequestId)}`,
-                );
+                const workflowState = workflowRef.current;
+                const scope: WorkflowScope = { userId, cargoRequestId };
+                workflowState.setActiveScope(userId, cargoRequestId);
+                const cachedCargo = workflowState.getVerifiedCargo(scope);
+                const cargo = isReusableCargo(cachedCargo, userId, cargoRequestId)
+                    ? cachedCargo
+                    : await apiRequest<CargoRequestResponse>(
+                        `/api/v1/cargo-requests/${encodeURIComponent(cargoRequestId)}`,
+                    );
                 if (
                     cargo.cargo_request_id !== cargoRequestId ||
                     cargo.user_id !== userId ||
                     cargoUserId !== userId
                 ) {
                     throw new Error("The active cargo request could not be verified.");
+                }
+                if (!isReusableCargo(cachedCargo, userId, cargoRequestId) &&
+                    isReusableCargo(cargo, userId, cargoRequestId)) {
+                    workflowState.setVerifiedCargo(scope, cargo);
                 }
 
                 const recommendation = getStoredRecommendation(userId, cargoRequestId);
@@ -110,14 +129,24 @@ function CostAnalysis() {
                 ) {
                     throw new Error("No matching cached recommendation is available. Open Decision Overview before viewing cost analysis.");
                 }
-                const cost = await apiRequest<CostResponse>("/api/v1/cost", {
-                    method: "POST",
-                    body: JSON.stringify({
-                        cargo_request_id: cargoRequestId,
-                        forecast_run_id: recommendation.forecast_run_id,
-                        use_forecast_central_rate: true,
-                    }),
-                });
+                const forecastRunId = recommendation.forecast_run_id;
+                const cachedCost = workflowState.getCost(scope, forecastRunId);
+                let cost = isValidCost(cachedCost) ? cachedCost : null;
+                if (!cost) {
+                    const response = await apiRequest<CostResponse>("/api/v1/cost", {
+                        method: "POST",
+                        body: JSON.stringify({
+                            cargo_request_id: cargoRequestId,
+                            forecast_run_id: forecastRunId,
+                            use_forecast_central_rate: true,
+                        }),
+                    });
+                    if (!isValidCost(response)) {
+                        throw new Error("The Cost API returned an invalid cost result.");
+                    }
+                    cost = response;
+                    workflowState.setCost(scope, forecastRunId, cost);
+                }
                 return { cargo, recommendation, cost };
             })();
             operationRef.current = { key, promise };
@@ -141,6 +170,13 @@ function CostAnalysis() {
 
     const retry = () => {
         if (!cargoRequestId || !cargoUserId || !userId) return;
+        const recommendation = getStoredRecommendation(userId, cargoRequestId);
+        if (recommendation?.forecast_run_id) {
+            workflowRef.current.invalidateWorkflowEntry({
+                type: "cost",
+                forecastRunId: recommendation.forecast_run_id,
+            });
+        }
         operationRef.current = null;
         setPageState({ status: "loading" });
         setRetryCount((count) => count + 1);
@@ -173,8 +209,6 @@ function CostAnalysis() {
                         {showEmpty ? "No active request" : pageState.status === "loading" ? "Loading cost data" : pageState.status === "success" ? "Cost available" : "Cost unavailable"}
                     </div>
                 </header>
-
-                <DataProvenance />
 
                 {showEmpty ? (
                     <section className="cost-comparison-card">

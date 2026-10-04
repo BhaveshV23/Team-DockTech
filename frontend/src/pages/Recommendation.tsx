@@ -8,7 +8,6 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
-import DataProvenance from "../components/DataProvenance";
 import { useCargoRequest } from "../hooks/useCargoRequest";
 import { useAuthenticatedUser } from "../services/api";
 import { getStoredRecommendation } from "../services/recommendation";
@@ -107,8 +106,6 @@ function Recommendation() {
                             : "Recommendation unavailable"}
                     </div>
                 </header>
-
-                <DataProvenance />
 
                 {/* Cargo Request Context */}
                 <section className="recommendation-request-card">

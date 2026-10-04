@@ -10,6 +10,7 @@ import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import { useCargoRequest } from "../hooks/useCargoRequest";
 import { apiRequest, startPageLoadTiming, useAuthenticatedUser } from "../services/api";
+import { useWorkflowState } from "../context/WorkflowStateContext";
 import {
     createRecommendation,
     getStoredRecommendation,
@@ -43,9 +44,26 @@ function formatDateTime(value: string): string {
     return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
+function hasRequiredRecommendationFields(value: RecommendationResult): boolean {
+    const isDecimal = (field: unknown) => typeof field === "number" || typeof field === "string";
+    return typeof value.recommendation_id === "string" && value.recommendation_id.length > 0 &&
+        typeof value.cargo_request_id === "string" && typeof value.forecast_run_id === "string" &&
+        typeof value.recommended_vessel_class_id === "string" &&
+        (value.market_entry_action === "FIX_NOW" || value.market_entry_action === "WAIT") &&
+        (value.contract_strategy === "SPOT" || value.contract_strategy === "SHORT_TERM_MULTIPLE_VOYAGE") &&
+        isDecimal(value.expected_freight_cost) && isDecimal(value.expected_total_cost) &&
+        isDecimal(value.estimated_turnaround_hours) &&
+        (value.risk_level === "LOW" || value.risk_level === "MEDIUM" || value.risk_level === "HIGH") &&
+        (value.confidence === "LOW" || value.confidence === "MEDIUM" || value.confidence === "HIGH") &&
+        typeof value.rationale === "string" && typeof value.assumptions === "string" &&
+        typeof value.created_at === "string";
+}
+
 function DecisionOverview() {
     const storedCargo = useCargoRequest();
     const user = useAuthenticatedUser();
+    const workflow = useWorkflowState();
+    const workflowRef = useRef(workflow);
     const cargoRequestId = storedCargo?.cargo_request_id;
     const userId = user?.user_id;
     const [retryCount, setRetryCount] = useState(0);
@@ -58,20 +76,31 @@ function DecisionOverview() {
     } | null>(null);
 
     useEffect(() => {
+        workflowRef.current = workflow;
+    }, [workflow]);
+
+    useEffect(() => {
         if (!cargoRequestId || !userId) return;
 
         let active = true;
         const finishTiming = startPageLoadTiming("Decision Overview");
         const key = `${userId}:${cargoRequestId}`;
+        const scope = { userId, cargoRequestId };
         let promise = operationRef.current?.key === key
             ? operationRef.current.promise
             : null;
 
         if (!promise) {
             promise = (async () => {
+                const workflowState = workflowRef.current;
+                const contextCargo = retryCount === 0
+                    ? workflowState.getVerifiedCargo(scope)
+                    : null;
+                workflowState.setActiveScope(userId, cargoRequestId);
+
                 // Read the user-and-cargo scoped cache before doing any network work.
                 const cachedRecommendation = getStoredRecommendation(userId, cargoRequestId);
-                const cargoRequest = await apiRequest<CargoRequestResponse>(
+                const cargoRequest = contextCargo ?? await apiRequest<CargoRequestResponse>(
                     `/api/v1/cargo-requests/${encodeURIComponent(cargoRequestId)}`,
                 );
                 if (
@@ -80,14 +109,15 @@ function DecisionOverview() {
                 ) {
                     throw new Error("The saved cargo request does not match the current user or request.");
                 }
+                if (!contextCargo) workflowState.setVerifiedCargo(scope, cargoRequest);
 
                 // Recheck after ownership validation in case another page populated
                 // the shared cache while the cargo request was being verified.
                 const recommendation = cachedRecommendation ??
                     getStoredRecommendation(userId, cargoRequestId) ??
                     await createRecommendation(cargoRequestId);
-                if (recommendation.cargo_request_id !== cargoRequestId) {
-                    throw new Error("The backend recommendation belongs to a different cargo request.");
+                if (recommendation.cargo_request_id !== cargoRequestId || !hasRequiredRecommendationFields(recommendation)) {
+                    throw new Error("The recommendation does not match the current cargo request or is incomplete.");
                 }
                 if (!cachedRecommendation) {
                     storeRecommendation(userId, cargoRequestId, recommendation);
@@ -115,6 +145,7 @@ function DecisionOverview() {
 
     const retry = () => {
         if (cargoRequestId && userId) {
+            workflowRef.current.invalidateWorkflowEntry({ type: "verifiedCargo" });
             operationRef.current = null;
             setPageState({ status: "loading" });
             setRetryCount((count) => count + 1);

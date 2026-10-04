@@ -3,8 +3,9 @@ import type { ReactNode } from "react";
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";
 
-import { apiRequest, getAuthConfigurationError, setAuthenticatedProfile, setCurrentAccessToken, supabase } from "./services/api";
+import { apiRequest, getAuthConfigurationError, setAuthenticatedProfile, setCurrentAccessToken, supabase, useAuthenticatedUser } from "./services/api";
 import type { AuthProfile } from "./services/api";
+import { WorkflowStateProvider } from "./context/WorkflowStateContext";
 import Login from "./pages/Login";
 import SignupPage from "./pages/SignupPage";
 import Dashboard from "./pages/Dashboard";
@@ -127,29 +128,39 @@ function AuthProvider({ children }: { children: ReactNode }) {
   return <AuthContext.Provider value={auth}>{children}</AuthContext.Provider>;
 }
 
+function AppRoutes({ configurationError }: { configurationError: string | null }) {
+  const user = useAuthenticatedUser();
+  const authenticatedUserId = user?.user_id ?? null;
+  return (
+    <WorkflowStateProvider key={authenticatedUserId ?? "unauthenticated"} authenticatedUserId={authenticatedUserId}>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<SignupPage />} />
+        <Route element={<ProtectedRoutes />}>
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/cargo-request" element={<CargoRequest />} />
+          <Route path="/decision-overview" element={<DecisionOverview />} />
+          <Route path="/freight-forecast" element={<FreightForecast />} />
+          <Route path="/vessel-options" element={<VesselOptions />} />
+          <Route path="/cost-analysis" element={<CostAnalysis />} />
+          <Route path="/scenarios-risk" element={<ScenariosRisk />} />
+          <Route path="/recommendation" element={<Recommendation />} />
+          <Route path="/decision-report" element={<DecisionReport />} />
+          <Route path="/admin/users" element={<AdminUserRoles />} />
+        </Route>
+        <Route path="/" element={<Navigate to={configurationError ? "/login" : "/dashboard"} replace />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    </WorkflowStateProvider>
+  );
+}
+
 function App() {
   const configurationError = getAuthConfigurationError();
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<SignupPage />} />
-          <Route element={<ProtectedRoutes />}>
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/cargo-request" element={<CargoRequest />} />
-            <Route path="/decision-overview" element={<DecisionOverview />} />
-            <Route path="/freight-forecast" element={<FreightForecast />} />
-            <Route path="/vessel-options" element={<VesselOptions />} />
-            <Route path="/cost-analysis" element={<CostAnalysis />} />
-            <Route path="/scenarios-risk" element={<ScenariosRisk />} />
-            <Route path="/recommendation" element={<Recommendation />} />
-            <Route path="/decision-report" element={<DecisionReport />} />
-            <Route path="/admin/users" element={<AdminUserRoles />} />
-          </Route>
-          <Route path="/" element={<Navigate to={configurationError ? "/login" : "/dashboard"} replace />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
-        </Routes>
+        <AppRoutes configurationError={configurationError} />
       </AuthProvider>
     </BrowserRouter>
   );
