@@ -1,1 +1,0 @@
-{"model_version": "docktech-ridge-ar-v1", "training_period": {"end": "2024-04-09"}, "residual_std_by_series": {"R||V||USD_PER_MT": 5000.0}, "selected_model_by_series": {"R||V||USD_PER_MT": "seasonal_naive_7d"}, "model_versions": {"seasonal_naive_7d": "docktech-seasonal-naive-7d-v1", "ridge_autoregression": "docktech-ridge-ar-v1"}}
